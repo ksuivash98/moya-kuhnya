@@ -40,7 +40,6 @@ test("маршруты следующих этапов честно показы
   page,
 }) => {
   for (const path of [
-    "/recipes",
     "/menu",
     "/cooking",
     "/preparations",
@@ -76,4 +75,20 @@ test("настройки содержат подключение, темы и и
   await expect(page.getByText("На iPhone:", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "Тёмная", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+});
+
+test("раздел рецептов доступен и честно требует подключение и вход", async ({
+  page,
+}) => {
+  await page.goto("/recipes");
+  await expect(
+    page.getByRole("heading", { name: "Мои рецепты" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Подключите семейную книгу рецептов" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Войти в аккаунт", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toBeVisible();
 });

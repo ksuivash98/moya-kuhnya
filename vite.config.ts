@@ -37,5 +37,12 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: { "supabase-vendor": ["@supabase/supabase-js"] },
+      },
+    },
+  },
   test: { include: ["tests/**/*.test.ts"], testTimeout: 30000 },
 });

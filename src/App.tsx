@@ -1,3 +1,6 @@
+import { lazy, Suspense } from "react";
+import { useRecipeCount } from "./recipes/useRecipeCount";
+import Modal from "./components/Modal";
 import {
   useCallback,
   useEffect,
@@ -51,6 +54,7 @@ import {
   roleNames,
   supabase,
 } from "./supabase";
+const RecipesPage = lazy(() => import("./recipes/RecipesPage"));
 type Membership = {
   family_id: string;
   role: string;
@@ -145,39 +149,6 @@ const sections = [
     description: "Ваше семейное пространство",
   },
 ];
-function Modal({
-  title,
-  children,
-  onClose,
-}: {
-  title: string;
-  children: ReactNode;
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    ref.current?.showModal();
-    return () => ref.current?.close();
-  }, []);
-  return (
-    <dialog
-      ref={ref}
-      onCancel={onClose}
-      aria-labelledby="dialog-title"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="modal-head">
-        <h2 id="dialog-title">{title}</h2>
-        <button className="icon-button" aria-label="Закрыть" onClick={onClose}>
-          <X size={20} />
-        </button>
-      </div>
-      {children}
-    </dialog>
-  );
-}
 function Auth({
   recovery,
   onClose,
@@ -380,6 +351,10 @@ export default function App() {
   const familyIdRef = useRef(familyId);
   familyIdRef.current = familyId;
   const selected = memberships.find((m) => m.family_id === familyId);
+  const [recipeCount, setRecipeCount] = useRecipeCount(
+    familyId,
+    session?.user.id,
+  );
   const notify = useCallback((s: string) => setToast(s), []);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -563,6 +538,12 @@ export default function App() {
     .trim()
     .split(" ")[0];
   async function signout() {
+    if (
+      !window.dispatchEvent(
+        new Event("kitchen-before-signout", { cancelable: true }),
+      )
+    )
+      return;
     try {
       const { error } = await client().auth.signOut();
       check(error);
@@ -781,8 +762,12 @@ export default function App() {
                     <Stat
                       icon={<BookOpen />}
                       label="Семейные рецепты"
-                      value="—"
-                      detail="Появятся на следующем этапе"
+                      value={recipeCount === null ? "—" : String(recipeCount)}
+                      detail={
+                        recipeCount === null
+                          ? "Подключите семейную книгу"
+                          : "Сохранено для всей семьи"
+                      }
                       color="rose"
                     />
                     <Stat
@@ -916,6 +901,33 @@ export default function App() {
               }
             />
             <Route
+              path="/recipes"
+              element={
+                <Suspense
+                  fallback={
+                    <div className="panel" role="status">
+                      Загружаем книгу рецептов…
+                    </div>
+                  }
+                >
+                  {" "}
+                  <RecipesPage
+                    key={`${session?.user.id ?? "guest"}:${familyId}`}
+                    userId={session?.user.id}
+                    familyId={familyId}
+                    canEdit={Boolean(
+                      selected &&
+                        (selected.role !== "child" || selected.child_can_edit),
+                    )}
+                    onAuth={() => setAuthOpen(true)}
+                    onFamily={openFamily}
+                    notify={notify}
+                    onCount={setRecipeCount}
+                  />{" "}
+                </Suspense>
+              }
+            />
+            <Route
               path="/settings"
               element={
                 <SettingsPage
@@ -958,7 +970,7 @@ export default function App() {
               }
             />
             {sections
-              .filter((s) => s.stage)
+              .filter((s) => s.stage && s.path !== "/recipes")
               .map((s) => (
                 <Route
                   key={s.path}

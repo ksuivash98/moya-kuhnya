@@ -21,12 +21,12 @@ test("Pages: ресурсы, навигация, прямые ссылки и PW
     .click();
   await expect(page).toHaveURL(/\/moya-kuhnya\/recipes$/);
   await expect(
-    page.getByRole("heading", { name: "Рецепты", exact: true }),
+    page.getByRole("heading", { name: "Мои рецепты", exact: true }),
   ).toBeVisible();
   expect((await page.request.get("/moya-kuhnya/recipes")).status()).toBe(404);
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "Рецепты", exact: true }),
+    page.getByRole("heading", { name: "Мои рецепты", exact: true }),
   ).toBeVisible();
   await page.goto("/moya-kuhnya/auth/callback?code=test");
   await expect(
