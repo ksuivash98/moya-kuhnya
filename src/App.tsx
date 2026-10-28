@@ -210,7 +210,10 @@ function Auth({
           password,
           options: {
             data: { display_name: String(fields.get("name") ?? "") },
-            emailRedirectTo: window.location.origin + "/auth/callback",
+            emailRedirectTo: new URL(
+              `${import.meta.env.BASE_URL}auth/callback`,
+              window.location.origin,
+            ).href,
           },
         });
         check(error);
@@ -223,7 +226,10 @@ function Auth({
       }
       if (mode === "reset") {
         const { error } = await auth.resetPasswordForEmail(email, {
-          redirectTo: window.location.origin + "/auth/callback",
+          redirectTo: new URL(
+            `${import.meta.env.BASE_URL}auth/callback`,
+            window.location.origin,
+          ).href,
         });
         check(error);
         notify(

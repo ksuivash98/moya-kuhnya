@@ -75,3 +75,17 @@ PWA работает на HTTPS или loopback. На iOS: Safari → «Поде
 - `docs/architecture.md` — границы этапов, безопасность и дальнейшая архитектура.
 
 Следующий этап по отдельному запросу: книга рецептов — CRUD, ингредиенты, порции, избранное, поиск и приватные фотографии.
+
+## GitHub Pages — автоматическая веб-версия
+
+Исходники React нельзя публиковать через «Deploy from a branch / main / root».
+
+1. Откройте **Settings → Pages → Build and deployment → Source** и выберите **GitHub Actions**. Это настройка один раз.
+2. Workflow `.github/workflows/pages.yml` запускается при каждом push в `main`: проверяет типы и SQL-тесты, собирает Vite, публикует **dist**. Для повторного запуска: **Actions → Публикация веб-версии → Run workflow → main**.
+3. После успешного задания `deploy` адрес: **https://ksuivash98.github.io/moya-kuhnya/**. Публикация может занять несколько минут; её статус доступен в Actions.
+4. Для подключения Supabase добавьте публичные `VITE_SUPABASE_URL` и `VITE_SUPABASE_ANON_KEY` в **Settings → Secrets and variables → Actions → Variables**, затем перезапустите workflow. Без них откроется веб-интерфейс с инструкцией подключения.
+5. В Supabase Site URL укажите `https://ksuivash98.github.io/moya-kuhnya/`, а Redirect URLs — `https://ksuivash98.github.io/moya-kuhnya/auth/callback`.
+
+Путь проекта задаётся `VITE_BASE_PATH`. Ресурсы, BrowserRouter, manifest и service worker учитывают его. `404.html` позволяет открывать прямые SPA-ссылки: GitHub Pages отвечает HTTP 404, но приложение отображает нужную страницу и сохраняет параметры Auth. На хостингах с полноценным SPA rewrite можно сохранить обычный корневой `npm run build`.
+
+Проверка GitHub Pages локально: `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:pages`. Тестовый сервер эмулирует путь проекта и HTTP 404 без встроенного Vite fallback. Обычные тесты `npm run test:ui` выполняйте отдельно, последовательно: обе проверки собирают `dist`.
