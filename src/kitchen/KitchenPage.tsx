@@ -1,3 +1,4 @@
+import Inventory from "./Inventory";
 import { useCallback, useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { client, configured, errorText } from "../supabase";
@@ -137,6 +138,28 @@ export default function KitchenPage({
         </div>
       </>
     );
+  const required = (
+    {
+      menu: 4,
+      cooking: 4,
+      products: 5,
+      preparations: 5,
+      shopping: 6,
+      budget: 6,
+      assistant: 7,
+      analytics: 8,
+    } as Record<string, number>
+  )[kind];
+  if (state && state.schema_version < required)
+    return (
+      <>
+        {heading}
+        <div className="notice">
+          Для этого раздела нужно применить новые SQL-миграции. Порядок описан в
+          IMPLEMENTATION_PROGRESS.md.
+        </div>
+      </>
+    );
   const props: ModuleProps = {
     state: state!,
     recipes,
@@ -159,7 +182,11 @@ export default function KitchenPage({
           <button onClick={() => void reload()}>Повторить</button>
         </div>
       )}
-      {state && <Planning kind={kind} {...props} />}
+      {state && ["products", "preparations"].includes(kind) ? (
+        <Inventory kind={kind} {...props} />
+      ) : (
+        <Planning kind={kind} {...props} />
+      )}
     </>
   );
 }

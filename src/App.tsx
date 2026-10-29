@@ -928,7 +928,7 @@ export default function App() {
                 </Suspense>
               }
             />
-            {["menu", "cooking"].map((kind) => (
+            {["menu", "cooking", "products", "preparations"].map((kind) => (
               <Route
                 key={kind}
                 path={`/${kind}`}
@@ -997,7 +997,13 @@ export default function App() {
               .filter(
                 (s) =>
                   s.stage &&
-                  !["/recipes", "/menu", "/cooking"].includes(s.path),
+                  ![
+                    "/recipes",
+                    "/menu",
+                    "/cooking",
+                    "/products",
+                    "/preparations",
+                  ].includes(s.path),
               )
               .map((s) => (
                 <Route

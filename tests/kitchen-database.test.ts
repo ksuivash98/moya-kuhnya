@@ -33,6 +33,7 @@ beforeAll(async () => {
     "202610280001_foundation.sql",
     "202610280002_recipes.sql",
     "202610290003_planning.sql",
+    "202610290004_inventory.sql",
   ])
     await db.exec(readFileSync("supabase/migrations/" + file, "utf8"));
   await db.query("insert into auth.users(id)values($1),($2)", [owner, other]);
@@ -185,4 +186,78 @@ test("RLS и права защищают всю кухню другой семь
   await expect(
     db.query("update public.stock_batches set quantity=-1"),
   ).rejects.toThrow("permission denied");
+});
+test("заготовка частично используется без повторного списания ингредиентов", async () => {
+  const prep = (
+    await db.query<{ id: string; version: number }>(
+      "select id,version from public.preparations where quantity=2",
+    )
+  ).rows[0];
+  const before = await scalar("select sum(quantity) from public.stock_batches");
+  const key = crypto.randomUUID(),
+    d = {
+      id: prep.id,
+      version: prep.version,
+      quantity: 0.5,
+      reason: "Использование",
+      date: "2099-01-03",
+    };
+  await op("prep_use", d, key);
+  await op("prep_use", d, key);
+  expect(
+    Number(
+      await scalar("select quantity from public.preparations where id=$1", [
+        prep.id,
+      ]),
+    ),
+  ).toBe(1.5);
+  expect(await scalar("select sum(quantity) from public.stock_batches")).toBe(
+    before,
+  );
+  await expect(
+    op("prep_use", { ...d, version: 2, quantity: 99 }),
+  ).rejects.toThrow("не превышать");
+});
+test("ручная партия и корректировки сохраняют журнал; кг не теряются", async () => {
+  const pid = crypto.randomUUID(),
+    bid = crypto.randomUUID();
+  await op("product_save", {
+    id: pid,
+    name: "Мука",
+    category: "Другое",
+    unit: "г",
+    minimum: 100,
+  });
+  await op("batch_save", {
+    id: bid,
+    product_id: pid,
+    quantity: 2,
+    unit: "кг",
+    purchased_on: "2099-01-01",
+    expires_on: "2099-05-01",
+  });
+  expect(
+    Number(
+      await scalar("select quantity from public.stock_batches where id=$1", [
+        bid,
+      ]),
+    ),
+  ).toBe(2000);
+  await op("batch_save", {
+    id: bid,
+    version: 1,
+    product_id: pid,
+    quantity: 1500,
+    unit: "г",
+    purchased_on: "2099-01-01",
+    reason: "Списание",
+  });
+  expect(
+    Number(
+      await scalar(
+        "select sum(quantity) from public.stock_movements where batch_id=$1",
+        [bid],
+      ),
+    ),
+  ).toBe(1500);
 });

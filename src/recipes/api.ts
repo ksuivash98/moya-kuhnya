@@ -128,9 +128,10 @@ export async function viewRecipe(id: string) {
   check(error);
 }
 export async function signedPhoto(path: string) {
+  const prep = path.startsWith("prep:");
   const { data, error } = await client()
-    .storage.from("recipe-photos")
-    .createSignedUrl(path, 900);
+    .storage.from(prep ? "preparation-photos" : "recipe-photos")
+    .createSignedUrl(prep ? path.slice(5) : path, 900);
   check(error);
   return data?.signedUrl ?? "";
 }

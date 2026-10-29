@@ -39,14 +39,7 @@ test("тема сохраняется после перезагрузки", asyn
 test("маршруты следующих этапов честно показывают статус разработки", async ({
   page,
 }) => {
-  for (const path of [
-    "/preparations",
-    "/shopping",
-    "/products",
-    "/budget",
-    "/assistant",
-    "/analytics",
-  ]) {
+  for (const path of ["/shopping", "/budget", "/assistant", "/analytics"]) {
     await page.goto(path);
     await expect(
       page.getByRole("heading", { name: "Здесь скоро станет уютно" }),
