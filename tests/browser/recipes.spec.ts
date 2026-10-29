@@ -240,7 +240,9 @@ test("поиск, фильтры, избранное, список и недос
     await expect(
       page
         .getByRole("dialog")
-        .getByText("ИИ-интеграция ещё не подключена.", { exact: false }),
+        .getByText("Импорт видео и ссылок пока не реализован.", {
+          exact: false,
+        }),
     ).toBeVisible();
     expect(
       (await backend.query("select id from public.recipes")).rows,
@@ -408,6 +410,248 @@ test("ошибка сохранения не оставляет рецепт и�
     ).toBeVisible();
     expect(backend.bytes.size).toBe(1);
   } finally {
+    await backend.close();
+  }
+});
+
+const recognized = {
+  is_recipe: true,
+  title: "Сырники из источника",
+  description: "Утренний рецепт",
+  category: "Завтраки",
+  prep: 10,
+  cook: 20,
+  servings: 4,
+  difficulty: null,
+  ingredients: [{ name: "Творог", amount: "500", unit: "г", note: "" }],
+  steps: ["Смешать и обжарить"],
+  notes: "",
+  warnings: ["Проверьте название блюда"],
+};
+async function openImport(
+  page: import("@playwright/test").Page,
+  kind = "Из текста",
+) {
+  await page.goto("/recipes");
+  await page
+    .getByRole("button", { name: "Добавить рецепт", exact: true })
+    .click();
+  await page.getByRole("button", { name: kind, exact: false }).click();
+}
+test("импорт текста: согласие → предпросмотр → правка → черновик после перезагрузки → явное сохранение", async ({
+  page,
+}) => {
+  const backend = await recipeBackend(page);
+  let calls = 0;
+  await page.route("**/functions/v1/recipe-import", async (route) => {
+    calls++;
+    const input = route.request().postDataJSON();
+    expect(input.consent).toBe(true);
+    expect(input.source).toEqual({
+      kind: "text",
+      text: "Сырники: 500 г творога. Смешать и обжарить.",
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ id: input.id, result: recognized }),
+    });
+  });
+  try {
+    await openImport(page);
+    await page
+      .getByLabel("Текст рецепта", { exact: true })
+      .fill("Сырники: 500 г творога. Смешать и обжарить.");
+    await expect(
+      page.getByRole("button", { name: "Распознать рецепт", exact: true }),
+    ).toBeDisabled();
+    expect(calls).toBe(0);
+    await page
+      .getByRole("checkbox", {
+        name: "Разрешаю отправить этот источник в OpenAI для распознавания",
+      })
+      .check();
+    await page
+      .getByRole("button", { name: "Распознать рецепт", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Сырники из источника", exact: true }),
+    ).toBeVisible();
+    expect(
+      (await backend.query("select id from public.recipes")).rows,
+    ).toHaveLength(0);
+    await page
+      .getByRole("button", { name: "Проверить и редактировать", exact: true })
+      .click();
+    await expect(
+      page.getByLabel("Название рецепта *", { exact: true }),
+    ).toHaveValue("Сырники из источника");
+    await page
+      .getByLabel("Название рецепта *", { exact: true })
+      .fill("Исправленные сырники");
+    await page
+      .getByLabel("Количество ингредиента 1", { exact: true })
+      .fill("450");
+    await expect(
+      page.getByText("Черновик сохранён на этом устройстве.", { exact: true }),
+    ).toBeVisible();
+    page.on("dialog", (dialog) => dialog.accept());
+    await page.reload();
+    await expect(
+      page.getByLabel("Название рецепта *", { exact: true }),
+    ).toHaveValue("Исправленные сырники");
+    await expect(
+      page.getByLabel("Количество ингредиента 1", { exact: true }),
+    ).toHaveValue("450");
+    await expect(
+      page.getByText("Проверьте название блюда", { exact: true }),
+    ).toBeVisible();
+    expect(calls).toBe(1);
+    await openImport(page);
+    await page
+      .getByText("Мои черновики после распознавания", { exact: true })
+      .click();
+    await page.getByRole("button", { name: /Исправленные сырники ·/ }).click();
+    await expect(
+      page.getByLabel("Количество ингредиента 1", { exact: true }),
+    ).toHaveValue("450");
+    expect(calls).toBe(1);
+    expect(
+      (await backend.query("select id from public.recipes")).rows,
+    ).toHaveLength(0);
+    await page
+      .getByRole("button", { name: "Сохранить рецепт", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Исправленные сырники", exact: true }),
+    ).toBeVisible();
+    expect(
+      (await backend.query("select title from public.recipes")).rows,
+    ).toEqual([{ title: "Исправленные сырники" }]);
+    expect(
+      Number(
+        (
+          await backend.query<{ amount: string }>(
+            "select amount from public.recipe_ingredients",
+          )
+        ).rows[0].amount,
+      ),
+    ).toBe(450);
+    expect(
+      (await backend.query("select id from storage.objects")).rows,
+    ).toHaveLength(0);
+  } finally {
+    await page.close();
+    await backend.close();
+  }
+});
+test("импорт фото: только выбранный JPEG, понятная ошибка настройки и безопасный повтор", async ({
+  page,
+}) => {
+  const backend = await recipeBackend(page);
+  const ids: string[] = [];
+  await page.route("**/functions/v1/recipe-import", async (route) => {
+    const input = route.request().postDataJSON();
+    ids.push(input.id);
+    expect(input.source.kind).toBe("photo");
+    expect(input.source.image).toMatch(/^data:image\/jpeg;base64,/);
+    expect(Object.keys(input).sort()).toEqual([
+      "consent",
+      "family_id",
+      "id",
+      "source",
+    ]);
+    await route.fulfill({
+      status: ids.length === 1 ? 503 : 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        ids.length === 1
+          ? {
+              error: "Распознавание пока не включено. Настройте recipe-import.",
+            }
+          : { id: input.id, result: recognized },
+      ),
+    });
+  });
+  try {
+    await openImport(page, "По фото или скриншоту");
+    await photo(page, "Фото для распознавания");
+    await page
+      .getByRole("checkbox", {
+        name: "Разрешаю отправить этот источник в OpenAI для распознавания",
+      })
+      .check();
+    await page
+      .getByRole("button", { name: "Распознать рецепт", exact: true })
+      .click();
+    await expect(page.getByRole("alert")).toContainText(
+      "Распознавание пока не включено",
+    );
+    expect(
+      (await backend.query("select id from public.recipes")).rows,
+    ).toHaveLength(0);
+    await page
+      .getByRole("button", { name: "Распознать рецепт", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", {
+        name: "Проверить и редактировать",
+        exact: true,
+      }),
+    ).toBeVisible();
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toBe(ids[1]);
+    expect(
+      (await backend.query("select id from storage.objects")).rows,
+    ).toHaveLength(0);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  } finally {
+    await page.close();
+    await backend.close();
+  }
+});
+test("импорт: готовый результат восстанавливается из личной истории без нового ИИ-запроса", async ({
+  page,
+}) => {
+  const backend = await recipeBackend(page);
+  let calls = 0;
+  await page.route("**/rest/v1/recipe_import_requests?*", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([
+        {
+          id: "11111111-1111-4111-8111-111111111111",
+          source_kind: "text",
+          created_at: "2026-10-29T00:00:00Z",
+          result: recognized,
+        },
+      ]),
+    }),
+  );
+  await page.route("**/functions/v1/recipe-import", async (route) => {
+    calls++;
+    await route.abort();
+  });
+  try {
+    await openImport(page);
+    await page
+      .getByText("Мои последние распознавания", { exact: true })
+      .click();
+    await page.getByRole("button", { name: /29\.10\.2026.*Текст/ }).click();
+    await expect(
+      page.getByRole("heading", { name: "Сырники из источника", exact: true }),
+    ).toBeVisible();
+    expect(calls).toBe(0);
+    expect(
+      (await backend.query("select id from public.recipes")).rows,
+    ).toHaveLength(0);
+  } finally {
+    await page.close();
     await backend.close();
   }
 });

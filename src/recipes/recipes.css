@@ -877,3 +877,18 @@
   font-size: 13px;
   color: var(--muted);
 }
+.import-history {
+  margin-top: 1.2rem;
+}
+.import-history summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.import-history > button {
+  display: block;
+  width: 100%;
+  margin-top: 0.6rem;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

@@ -25,6 +25,7 @@ import { errorText } from "../supabase";
 import { PhotoField } from "./Photos";
 export default function RecipeForm({
   recipe,
+  draftId,
   userId,
   familyId,
   suggestions,
@@ -32,13 +33,14 @@ export default function RecipeForm({
   onCancel,
 }: {
   recipe?: Recipe;
+  draftId?: string;
   userId: string;
   familyId: string;
   suggestions: string[];
   onSaved: (id: string, warning?: boolean) => void;
   onCancel: () => void;
 }) {
-  const draftKey = `${userId}:${familyId}:${recipe?.id ?? "new"}`;
+  const draftKey = `${userId}:${familyId}:${recipe?.id ?? (draftId ? `import:${draftId}` : "new")}`;
   const [data, setData] = useState<RecipeData>(() =>
     structuredClone(recipe?.data ?? blankRecipe()),
   );
@@ -46,6 +48,7 @@ export default function RecipeForm({
   const [version, setVersion] = useState<number | null>(
     recipe?.version ?? null,
   );
+  const [importWarnings, setImportWarnings] = useState<string[]>([]);
   const [files, setFiles] = useState<Map<string, Blob>>(new Map());
   const [ready, setReady] = useState(false),
     [busy, setBusy] = useState(false),
@@ -56,8 +59,8 @@ export default function RecipeForm({
   const dirty = useRef(false),
     saving = useRef(false),
     live = useRef(true),
-    latest = useRef({ data, files, id, version });
-  latest.current = { data, files, id, version };
+    latest = useRef({ data, files, id, version, importWarnings });
+  latest.current = { data, files, id, version, importWarnings };
   const blocker = useBlocker(() => dirty.current);
   const markDirty = () => {
     dirty.current = true;
@@ -77,6 +80,7 @@ export default function RecipeForm({
         if (!live.current) return;
         if (draft) {
           setData(draft.data);
+          setImportWarnings(draft.importWarnings ?? []);
           setFiles(new Map(draft.files));
           setId(draft.recipeId);
           setVersion(draft.version);
@@ -109,6 +113,7 @@ export default function RecipeForm({
         files: [...files],
         version,
         updatedAt: Date.now(),
+        importWarnings,
       })
         .then(() => {
           if (live.current)
@@ -122,7 +127,7 @@ export default function RecipeForm({
         });
     }, 500);
     return () => clearTimeout(t);
-  }, [ready, data, files, id, version, busy, draftKey]);
+  }, [ready, data, files, id, version, busy, draftKey, importWarnings]);
   useEffect(() => {
     const unload = (e: BeforeUnloadEvent) => {
       if (dirty.current) {
@@ -145,6 +150,7 @@ export default function RecipeForm({
           files: [...last.files],
           version: last.version,
           updatedAt: Date.now(),
+          importWarnings: last.importWarnings,
         }).catch(() => {});
       }
     },
@@ -243,6 +249,24 @@ export default function RecipeForm({
           {draftStatus ||
             "Черновик сохраняется автоматически только на этом устройстве."}
         </p>
+        {draftId && (
+          <div className="notice">
+            <strong>
+              Черновик после распознавания — проверьте перед сохранением.
+            </strong>
+            <p>
+              ИИ может ошибаться. Незаданные количества, порции и время нужно
+              заполнить самостоятельно.
+            </p>
+            {importWarnings.length > 0 && (
+              <ul>
+                {importWarnings.map((w, n) => (
+                  <li key={n}>{w}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
         <fieldset disabled={busy} className="form-fieldset">
           <section className="panel">
             <h2>Основная информация</h2>
@@ -355,8 +379,8 @@ export default function RecipeForm({
               </span>
             </div>
             <p className="muted">
-              Подсказки — из ингредиентов семейных рецептов. Каталог домашних
-              продуктов появится на этапе 4.
+              Подсказки — из ингредиентов семейных рецептов. Остатки домашних
+              продуктов доступны в разделе «Мои продукты».
             </p>
             <datalist id="recipe-products">
               {suggestions.map((s) => (
@@ -407,6 +431,7 @@ export default function RecipeForm({
                     Единица
                     <select
                       aria-label={`Единица ингредиента ${index + 1}`}
+                      required
                       value={i.unit}
                       onChange={(e) =>
                         change(
@@ -426,6 +451,9 @@ export default function RecipeForm({
                         )
                       }
                     >
+                      <option value="" disabled>
+                        Выберите единицу
+                      </option>
                       {units.map((u) => (
                         <option key={u}>{u}</option>
                       ))}

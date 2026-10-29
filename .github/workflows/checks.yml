@@ -15,6 +15,10 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.5.6
+      - run: deno check --node-modules-dir=manual supabase/functions/recipe-import/index.ts supabase/functions/kitchen-assistant/index.ts
       - run: npx playwright install --with-deps chromium
       - run: npm run test:ui
       - run: npm run test:pages

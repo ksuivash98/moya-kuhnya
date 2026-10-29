@@ -27,7 +27,7 @@ const op = (
 beforeAll(async () => {
   db = new PGlite();
   await db.exec(
-    `create role anon;create role authenticated;create schema auth;create table auth.users(id uuid primary key,raw_user_meta_data jsonb default '{}');create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;grant usage on schema auth,public to authenticated;grant execute on function auth.uid() to authenticated;create schema storage;create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);create table storage.objects(id uuid default gen_random_uuid(),bucket_id text,name text,owner_id text);alter table storage.objects enable row level security;grant usage on schema storage to authenticated;grant select,insert,delete on storage.objects to authenticated;`,
+    `create role anon;create role authenticated;create role service_role;create schema auth;create table auth.users(id uuid primary key,raw_user_meta_data jsonb default '{}');create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;grant usage on schema auth,public to authenticated;grant execute on function auth.uid() to authenticated;create schema storage;create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);create table storage.objects(id uuid default gen_random_uuid(),bucket_id text,name text,owner_id text);alter table storage.objects enable row level security;grant usage on schema storage to authenticated;grant select,insert,delete on storage.objects to authenticated;`,
   );
   for (const file of [
     "202610280001_foundation.sql",
@@ -38,6 +38,7 @@ beforeAll(async () => {
     "202610290006_assistant.sql",
     "202610290007_notifications.sql",
     "202610290008_sync_guards.sql",
+    "202610290009_recipe_import.sql",
   ])
     await db.exec(readFileSync("supabase/migrations/" + file, "utf8"));
   await db.query("insert into auth.users(id)values($1),($2)", [owner, other]);
@@ -487,4 +488,91 @@ test("все новые семейные реестры изолированы R
     ]),
   ).rejects.toThrow("взрослым");
   await user();
+});
+test("импорт: ключ запроса идемпотентен, исходник не сохраняется, чужая семья и ребёнок отклоняются", async () => {
+  await user();
+  const id = crypto.randomUUID(),
+    hash = "a".repeat(64);
+  const reserve = (key = id, digest = hash) =>
+    scalar("select public.reserve_recipe_import($1,$2,'text',$3)", [
+      family,
+      key,
+      digest,
+    ]);
+  expect(await reserve()).toMatchObject({ fresh: true, status: "pending" });
+  expect(await reserve()).toMatchObject({ fresh: false, status: "pending" });
+  await expect(reserve(id, "b".repeat(64))).rejects.toThrow("использован");
+  await expect(
+    db.query(
+      "insert into public.recipe_import_requests(id,family_id,user_id,source_kind,input_hash)values($1,$2,$3,'text',$4)",
+      [crypto.randomUUID(), family, owner, hash],
+    ),
+  ).rejects.toThrow();
+  await expect(
+    db.query("delete from public.recipe_import_requests where id=$1", [id]),
+  ).rejects.toThrow();
+  await user(other);
+  expect(
+    await scalar("select count(*)::int from public.recipe_import_requests"),
+  ).toBe(0);
+  await expect(reserve(crypto.randomUUID())).rejects.toThrow("взрослым");
+  await db.exec("reset role");
+  await db.query(
+    "insert into public.family_members(family_id,user_id,role,child_can_edit)values($1,$2,'child',true)",
+    [family, other],
+  );
+  await user(other);
+  await expect(reserve(crypto.randomUUID())).rejects.toThrow("взрослым");
+  expect(
+    await scalar("select count(*)::int from public.recipe_import_requests"),
+  ).toBe(0);
+  await db.exec("reset role");
+  await db.query(
+    "update public.family_members set role='adult'where family_id=$1 and user_id=$2",
+    [family, other],
+  );
+  await user(other);
+  expect(
+    await scalar("select count(*)::int from public.recipe_import_requests"),
+  ).toBe(0);
+  await expect(
+    db.query(
+      "update public.recipe_import_requests set status='ready'where id=$1",
+      [id],
+    ),
+  ).rejects.toThrow();
+  await db.exec("reset role");
+  await db.query(
+    "delete from public.family_members where family_id=$1 and user_id=$2",
+    [family, other],
+  );
+  await user();
+});
+test("импорт: квота учитывает неудачные запросы во всех семьях пользователя", async () => {
+  await user();
+  const second = await scalar(
+    "select public.create_family('Вторая тестовая семья')",
+  );
+  for (let n = 0; n < 4; n++)
+    await db.query("select public.reserve_recipe_import($1,$2,'photo',$3)", [
+      n % 2 ? family : second,
+      crypto.randomUUID(),
+      "c".repeat(64),
+    ]);
+  await db.exec("reset role");
+  await db.query(
+    "update public.recipe_import_requests set status='failed'where user_id=$1",
+    [owner],
+  );
+  await user();
+  await expect(
+    db.query("select public.reserve_recipe_import($1,$2,'text',$3)", [
+      second,
+      crypto.randomUUID(),
+      "d".repeat(64),
+    ]),
+  ).rejects.toThrow("5 распознаваний");
+  expect(
+    await scalar("select count(*)::int from public.recipe_import_requests"),
+  ).toBe(5);
 });

@@ -6,6 +6,7 @@ export type Draft = {
   files: [string, Blob][];
   version: number | null;
   updatedAt: number;
+  importWarnings?: string[];
 };
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -44,3 +45,10 @@ export const writeDraft = (draft: Draft) =>
   transaction("readwrite", (s) => s.put(draft));
 export const removeDraft = (key: string) =>
   transaction("readwrite", (s) => s.delete(key));
+export const recentImportDrafts = async (user: string, family: string) => {
+  const prefix = `${user}:${family}:import:`;
+  const drafts = await transaction<Draft[]>("readonly", (s) =>
+    s.getAll(IDBKeyRange.bound(prefix, prefix + "\uffff")),
+  );
+  return drafts.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5);
+};

@@ -22,6 +22,7 @@ import { archiveRecipe, loadRecipes, setFavorite } from "./api";
 import { categories, selectRecipes, type Recipe } from "./model";
 import RecipeForm from "./RecipeForm";
 import RecipeView from "./RecipeView";
+import RecipeImport from "./RecipeImport";
 import { Photo } from "./Photos";
 export default function RecipesPage({
   userId,
@@ -231,7 +232,10 @@ export default function RecipesPage({
   if (editing && canEdit && (params.has("new") || recipe))
     return (
       <RecipeForm
-        key={`${userId}:${familyId}:${recipe?.id ?? "new"}`}
+        key={`${userId}:${familyId}:${recipe?.id ?? params.get("import") ?? "new"}`}
+        draftId={
+          params.has("new") ? (params.get("import") ?? undefined) : undefined
+        }
         recipe={params.has("new") ? undefined : recipe}
         userId={userId}
         familyId={familyId}
@@ -519,7 +523,7 @@ export default function RecipesPage({
                   <strong>{o.name}</strong>
                   <small>{o.hint}</small>
                 </span>
-                {o.name !== "Вручную" && (
+                {["По видео", "По ссылке"].includes(o.name) && (
                   <span className="pill quiet">Позже</span>
                 )}
               </button>
@@ -527,12 +531,25 @@ export default function RecipesPage({
           </div>
         </Modal>
       )}
-      {importMode && (
+      {["По фото или скриншоту", "Из текста"].includes(importMode) && (
+        <RecipeImport
+          key={`${userId}:${familyId}:${importMode}`}
+          mode={importMode === "Из текста" ? "text" : "photo"}
+          userId={userId}
+          familyId={familyId}
+          onClose={() => setImportMode("")}
+          onReview={(id) => {
+            setImportMode("");
+            setParams({ new: "1", import: id });
+          }}
+        />
+      )}
+      {["По видео", "По ссылке"].includes(importMode) && (
         <Modal title={importMode} onClose={() => setImportMode("")}>
           <p className="notice">
-            ИИ-интеграция ещё не подключена. Файлы и ссылки не отправляются на
-            распознавание. Сейчас рецепт можно добавить вручную и загрузить
-            фотографии блюда и шагов.
+            Импорт видео и ссылок пока не реализован. Эти источники не
+            отправляются на распознавание. Сейчас рецепт можно добавить вручную
+            и загрузить фотографии блюда и шагов.
           </p>
           <div className="dialog-actions">
             <button className="secondary" onClick={() => setImportMode("")}>
