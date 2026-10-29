@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -35,6 +36,7 @@ export default function RecipeView({
   onFavorite: () => void;
   notify: (s: string) => void;
 }) {
+  const navigate = useNavigate();
   const d = recipe.data,
     [servings, setServings] = useState(String(d.servings));
   const counted = useRef("");
@@ -219,9 +221,13 @@ export default function RecipeView({
                 key={a.label}
                 className="secondary"
                 onClick={() =>
-                  notify(
-                    `Раздел «${a.section}» ещё не реализован. Запись не создана.`,
-                  )
+                  a.section === "Меню"
+                    ? navigate(`/menu?recipe=${recipe.id}`)
+                    : a.section === "План приготовления"
+                      ? navigate(`/cooking?recipe=${recipe.id}`)
+                      : notify(
+                          `Раздел «${a.section}» ещё не реализован. Запись не создана.`,
+                        )
                 }
               >
                 <a.icon size={17} />

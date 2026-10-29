@@ -355,9 +355,7 @@ test("детский аккаунт читает рецепты и избран�
       .getByRole("button", { name: "Добавить в меню", exact: true })
       .click();
     await expect(
-      page
-        .getByRole("status")
-        .filter({ hasText: "Раздел «Меню» ещё не реализован." }),
+      page.getByRole("heading", { name: "Меню", exact: true }),
     ).toBeVisible();
   } finally {
     await backend.close();

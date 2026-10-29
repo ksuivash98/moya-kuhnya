@@ -54,6 +54,7 @@ import {
   roleNames,
   supabase,
 } from "./supabase";
+const KitchenPage = lazy(() => import("./kitchen/KitchenPage"));
 const RecipesPage = lazy(() => import("./recipes/RecipesPage"));
 type Membership = {
   family_id: string;
@@ -927,6 +928,29 @@ export default function App() {
                 </Suspense>
               }
             />
+            {["menu", "cooking"].map((kind) => (
+              <Route
+                key={kind}
+                path={`/${kind}`}
+                element={
+                  <Suspense fallback={<p role="status">Загружаем раздел…</p>}>
+                    <KitchenPage
+                      key={`${kind}:${session?.user.id}:${familyId}`}
+                      kind={kind}
+                      userId={session?.user.id}
+                      familyId={familyId}
+                      canEdit={Boolean(
+                        selected &&
+                          (selected.role !== "child" ||
+                            selected.child_can_edit),
+                      )}
+                      onAuth={() => setAuthOpen(true)}
+                      notify={notify}
+                    />
+                  </Suspense>
+                }
+              />
+            ))}
             <Route
               path="/settings"
               element={
@@ -970,7 +994,11 @@ export default function App() {
               }
             />
             {sections
-              .filter((s) => s.stage && s.path !== "/recipes")
+              .filter(
+                (s) =>
+                  s.stage &&
+                  !["/recipes", "/menu", "/cooking"].includes(s.path),
+              )
               .map((s) => (
                 <Route
                   key={s.path}

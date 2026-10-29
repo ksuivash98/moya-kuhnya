@@ -22,6 +22,7 @@ export async function recipeBackend(
   for (const file of [
     "202610280001_foundation.sql",
     "202610280002_recipes.sql",
+    "202610290003_planning.sql",
   ])
     await db.exec(readFileSync(`supabase/migrations/${file}`, "utf8"));
   for (const id of [owner, child])
@@ -139,6 +140,7 @@ export async function recipeBackend(
           const name = url.pathname.split("/").pop()!,
             body = req.postDataJSON() as Record<string, unknown>;
           const keys: Record<string, string[]> = {
+            get_kitchen_state: ["p_family", "p_from", "p_to", "p_offset"],
             get_recipe_page: ["p_family", "p_offset"],
             save_recipe: ["p_id", "p_family", "p_data", "p_version"],
             set_recipe_favorite: ["p_recipe", "p_value"],

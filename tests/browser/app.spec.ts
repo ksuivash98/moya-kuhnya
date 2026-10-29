@@ -40,8 +40,6 @@ test("маршруты следующих этапов честно показы
   page,
 }) => {
   for (const path of [
-    "/menu",
-    "/cooking",
     "/preparations",
     "/shopping",
     "/products",
