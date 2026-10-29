@@ -77,11 +77,13 @@ export default function KitchenPage({
       )
       .subscribe();
     const refresh = () => void reload();
+    window.addEventListener("kitchen-synced", refresh);
     window.addEventListener("focus", refresh);
     window.addEventListener("online", refresh);
     const t = setInterval(refresh, 60000);
     return () => {
       void client().removeChannel(channel);
+      window.removeEventListener("kitchen-synced", refresh);
       window.removeEventListener("focus", refresh);
       window.removeEventListener("online", refresh);
       clearInterval(t);

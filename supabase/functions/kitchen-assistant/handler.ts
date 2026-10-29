@@ -55,6 +55,8 @@ export function validateProposal(
       (!i.recipe_id ||
         !i.date ||
         !/^\d{4}-\d{2}-\d{2}$/.test(i.date) ||
+        Number.isNaN(Date.parse(i.date + "T00:00:00Z")) ||
+        new Date(i.date + "T00:00:00Z").toISOString().slice(0, 10) !== i.date ||
         i.date < from ||
         i.date > to ||
         !["Завтрак", "Обед", "Ужин", "Перекус", "Другое"].includes(

@@ -140,12 +140,15 @@ export function needs(s: State, plans: Row[]): Need[] {
       const cooked = rows(s, "cooking_events").filter(
         (e) => e.menu_id === p.id,
       ).length;
+      const used = rows(s, "preparation_uses").filter(
+        (e) => e.menu_id === p.id,
+      ).length;
       const linked = rows(s, "cooking_tasks").filter(
         (t) =>
           t.menu_id === p.id &&
           !["Приготовлено", "Отменено"].includes(str(t, "status")),
       ).length;
-      count = Math.max(0, num(p, "planned_count") - cooked - linked);
+      count = Math.max(0, num(p, "planned_count") - cooked - used - linked);
     }
     if (
       [

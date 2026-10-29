@@ -868,3 +868,12 @@
     font-size: 25px;
   }
 }
+.recipe-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 18px;
+  margin: 28px 0;
+  font-size: 13px;
+  color: var(--muted);
+}

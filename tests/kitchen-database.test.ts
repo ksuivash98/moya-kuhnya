@@ -37,6 +37,7 @@ beforeAll(async () => {
     "202610290005_shopping_budget.sql",
     "202610290006_assistant.sql",
     "202610290007_notifications.sql",
+    "202610290008_sync_guards.sql",
   ])
     await db.exec(readFileSync("supabase/migrations/" + file, "utf8"));
   await db.query("insert into auth.users(id)values($1),($2)", [owner, other]);
@@ -409,5 +410,81 @@ test("напоминания не дублируются и доступны т�
   await expect(
     db.query("select public.refresh_kitchen_notifications($1)", [family]),
   ).rejects.toThrow("недоступна");
+  await user();
+});
+test("офлайн-снимок рецепта защищён версией и чужие семейные идентификаторы не принимаются", async () => {
+  await expect(
+    op("menu_save", {
+      id: crypto.randomUUID(),
+      recipe_id: recipe,
+      recipe_version: 999,
+      month: "2099-01-01",
+      date: "2099-01-20",
+      meal: "Ужин",
+      servings: 4,
+      planned_count: 1,
+      status: "Запланировано",
+    }),
+  ).rejects.toThrow("офлайн-копии");
+});
+test("параллельное использование заготовки не уводит остаток в минус", async () => {
+  const p = (
+    await db.query<{ id: string; version: number; quantity: string }>(
+      "select id,version,quantity from public.preparations where quantity>0 limit 1",
+    )
+  ).rows[0];
+  const attempt = {
+    id: p.id,
+    version: p.version,
+    quantity: p.quantity,
+    reason: "Списание",
+    date: "2099-01-03",
+  };
+  const result = await Promise.allSettled([
+    op("prep_use", attempt),
+    op("prep_use", attempt),
+  ]);
+  expect(result.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+  expect(
+    Number(
+      await scalar("select quantity from public.preparations where id=$1", [
+        p.id,
+      ]),
+    ),
+  ).toBe(0);
+});
+test("все новые семейные реестры изолированы RLS, включая деньги, историю и ИИ", async () => {
+  await user(other);
+  for (const table of [
+    "storage_places",
+    "products",
+    "stock_batches",
+    "stock_movements",
+    "menu_items",
+    "cooking_tasks",
+    "cooking_events",
+    "preparations",
+    "preparation_movements",
+    "preparation_uses",
+    "kitchen_operations",
+    "shopping_items",
+    "purchases",
+    "expenses",
+    "financial_movements",
+    "monthly_budgets",
+    "ai_requests",
+    "notifications",
+    "notification_preferences",
+  ])
+    expect(
+      Number(await scalar(`select count(*)::int from public.${table}`)),
+    ).toBe(0);
+  await expect(
+    db.query("select public.reserve_ai_request($1,$2,$3)", [
+      family,
+      crypto.randomUUID(),
+      { mode: "recommend" },
+    ]),
+  ).rejects.toThrow("взрослым");
   await user();
 });

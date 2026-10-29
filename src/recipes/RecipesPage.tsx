@@ -41,6 +41,7 @@ export default function RecipesPage({
   onCount: (n: number) => void;
 }) {
   const [params, setParams] = useSearchParams();
+  const [page, setPage] = useState(0);
   const [recipes, setRecipes] = useState<Recipe[]>([]),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
@@ -106,11 +107,13 @@ export default function RecipesPage({
       )
       .subscribe();
     const refresh = () => void reload();
+    window.addEventListener("kitchen-synced", refresh);
     window.addEventListener("focus", refresh);
     window.addEventListener("online", refresh);
     const t = setInterval(refresh, 60000);
     return () => {
       void client().removeChannel(channel);
+      window.removeEventListener("kitchen-synced", refresh);
       window.removeEventListener("focus", refresh);
       window.removeEventListener("online", refresh);
       clearInterval(t);
@@ -135,6 +138,15 @@ export default function RecipesPage({
       setBusy(false);
     }
   }
+  const filtered = selectRecipes(recipes, query, category, sort);
+  useEffect(() => setPage(0), [query, category, sort]);
+  useEffect(
+    () =>
+      setPage((p) =>
+        Math.min(p, Math.max(0, Math.ceil(filtered.length / 24) - 1)),
+      ),
+    [filtered.length],
+  );
   const heading = (
     <div className="page-heading recipe-page-heading">
       <div>
@@ -241,7 +253,7 @@ export default function RecipesPage({
         }}
       />
     );
-  const filtered = selectRecipes(recipes, query, category, sort);
+
   return (
     <>
       {!recipe && heading}
@@ -347,7 +359,7 @@ export default function RecipesPage({
             <div
               className={`recipe-grid ${layout === "list" ? "recipe-list" : ""}`}
             >
-              {filtered.map((r) => (
+              {filtered.slice(page * 24, (page + 1) * 24).map((r) => (
                 <article className="recipe-card" key={r.id}>
                   <button
                     className="recipe-image-button"
@@ -439,6 +451,29 @@ export default function RecipesPage({
             </section>
           )}
         </>
+      )}
+      {filtered.length > 24 && !recipe && !editing && (
+        <nav className="recipe-pagination" aria-label="Страницы рецептов">
+          <button
+            className="secondary"
+            aria-label="Предыдущая страница рецептов"
+            disabled={page === 0}
+            onClick={() => setPage((p) => p - 1)}
+          >
+            Назад
+          </button>
+          <span>
+            {page + 1} / {Math.ceil(filtered.length / 24)}
+          </span>
+          <button
+            className="secondary"
+            aria-label="Следующая страница рецептов"
+            disabled={(page + 1) * 24 >= filtered.length}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Далее
+          </button>
+        </nav>
       )}
       {chooser && (
         <Modal title="Как добавим рецепт?" onClose={() => setChooser(false)}>

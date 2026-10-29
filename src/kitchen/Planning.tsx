@@ -187,9 +187,13 @@ export default function Planning({
             },
           ];
   async function save(action: string, d: Record<string, unknown>, key: string) {
-    await mutate(family, action, d, key);
+    const result = await mutate(family, action, d, key);
     await reload();
-    notify("Изменения сохранены в семейной базе.");
+    notify(
+      result.queued
+        ? "Изменения сохранены на устройстве и ожидают синхронизации."
+        : "Изменения сохранены в семейной базе.",
+    );
   }
   function card(r: Row) {
     const completed = [
@@ -337,7 +341,7 @@ export default function Planning({
         {canEdit && (
           <button
             className="primary"
-            disabled={!recipes.length || !navigator.onLine}
+            disabled={!recipes.length}
             onClick={() =>
               setDialog({ action: kind === "menu" ? "menu_save" : "task_save" })
             }
@@ -502,6 +506,9 @@ export default function Planning({
       </section>
       {dialog && (
         <Fields
+          offlineAllowed={
+            dialog.action === "menu_save" || dialog.action === "task_save"
+          }
           title={
             dialog.action === "menu_repeat"
               ? "Повторить блюдо"

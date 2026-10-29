@@ -35,12 +35,12 @@ export default defineConfig({
   projects: [
     {
       name: "recipes-desktop",
-      testMatch: "**/recipes.spec.ts",
+      testMatch: ["**/recipes.spec.ts", "**/kitchen.spec.ts"],
       use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:4180" },
     },
     {
       name: "recipes-mobile",
-      testMatch: "**/recipes.spec.ts",
+      testMatch: ["**/recipes.spec.ts", "**/kitchen.spec.ts"],
       use: {
         ...devices["iPhone 13"],
         defaultBrowserType: "chromium",
@@ -49,12 +49,20 @@ export default defineConfig({
     },
     {
       name: "desktop",
-      testIgnore: ["**/pwa.spec.ts", "**/recipes.spec.ts"],
+      testIgnore: [
+        "**/pwa.spec.ts",
+        "**/recipes.spec.ts",
+        "**/kitchen.spec.ts",
+      ],
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "mobile",
-      testIgnore: ["**/pwa.spec.ts", "**/recipes.spec.ts"],
+      testIgnore: [
+        "**/pwa.spec.ts",
+        "**/recipes.spec.ts",
+        "**/kitchen.spec.ts",
+      ],
       use: { ...devices["iPhone 13"], defaultBrowserType: "chromium" },
     },
     {

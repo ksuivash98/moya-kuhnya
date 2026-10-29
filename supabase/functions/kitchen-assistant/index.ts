@@ -1,4 +1,7 @@
-import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.99.2";
+import {
+  createClient,
+  type SupabaseClient,
+} from "npm:@supabase/supabase-js@2.99.2";
 import { askProvider, validateProposal } from "./handler.ts";
 const headers = {
   "Access-Control-Allow-Origin":
@@ -44,7 +47,8 @@ Deno.serve(async (req: Request) => {
       return reply(413, { error: "Запрос слишком большой" });
     const body = JSON.parse(text);
     id = body.id;
-    if(typeof id!=="string"||!/^([0-9a-f]{8}-){1}[0-9a-f-]{27}$/i.test(id))return reply(400,{error:"Некорректный идентификатор запроса"});
+    if (typeof id !== "string" || !/^([0-9a-f]{8}-){1}[0-9a-f-]{27}$/i.test(id))
+      return reply(400, { error: "Некорректный идентификатор запроса" });
     const input = body.input;
     if (
       !input ||

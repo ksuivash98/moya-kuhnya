@@ -272,3 +272,20 @@ details .checkbox-label {
     overflow-wrap: anywhere;
   }
 }
+.k-sync {
+  margin: 16px 40px;
+}
+.k-sync p {
+  font-size: 12px;
+  margin: 8px 0;
+}
+.k-sync pre {
+  font-size: 11px;
+  max-height: 240px;
+  overflow: auto;
+}
+@media (max-width: 720px) {
+  .k-sync {
+    margin: 14px 20px;
+  }
+}

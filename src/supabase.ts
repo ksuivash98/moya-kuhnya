@@ -31,5 +31,25 @@ export function errorText(error: unknown): string {
     return "Слишком много запросов. Попробуйте немного позже.";
   if (/fetch|network/i.test(msg))
     return "Нет связи с сервером. Проверьте интернет и настройки Supabase.";
+  if (/duplicate key|unique constraint/i.test(msg))
+    return "Такая запись уже существует. Обновите данные или измените название.";
+  if (
+    /violates check constraint|not-null constraint|invalid input syntax/i.test(
+      msg,
+    )
+  )
+    return "Проверьте обязательные поля, даты, количества и единицы измерения.";
+  if (
+    /could not find.*function|schema cache|relation .*does not exist/i.test(msg)
+  )
+    return "Раздел ещё не подключён к базе. Примените новые SQL-миграции по инструкции проекта.";
+  if (
+    /permission denied|row-level security|jwt expired|invalid refresh token/i.test(
+      msg,
+    )
+  )
+    return "Недостаточно прав или сессия устарела. Проверьте семейный доступ и войдите заново.";
+  if (/could not be decoded|source image/i.test(msg))
+    return "Не удалось прочитать фотографию. Выберите другой файл JPEG, PNG или WebP.";
   return msg;
 }

@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import Modal from "../components/Modal";
 import { errorText } from "../supabase";
 export type Field = {
@@ -18,20 +18,27 @@ export default function Fields({
   initial,
   onSave,
   onClose,
+  offlineAllowed = false,
+  extra,
+  externalBusy = false,
 }: {
   title: string;
   fields: Field[];
   initial: Record<string, unknown>;
   onSave: (d: Record<string, unknown>, key: string) => Promise<void>;
   onClose: () => void;
+  offlineAllowed?: boolean;
+  extra?: ReactNode;
+  externalBusy?: boolean;
 }) {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const key = useRef(crypto.randomUUID());
+  const initialValue = useRef(initial);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
-    const d = { ...initial };
+    const d = { ...initialValue.current };
     for (const f of fields) d[f.key] = String(form.get(f.key) ?? "");
     setBusy(true);
     setError("");
@@ -45,22 +52,23 @@ export default function Fields({
     }
   }
   return (
-    <Modal title={title} onClose={() => !busy && onClose()}>
+    <Modal title={title} onClose={() => !busy && !externalBusy && onClose()}>
       <form onSubmit={submit} className="form-stack">
         <fieldset disabled={busy} className="k-fields">
+          {extra}
           {fields.map((f) => (
             <label key={f.key}>
               {f.label}
               {f.type === "textarea" ? (
                 <textarea
                   name={f.key}
-                  defaultValue={String(initial[f.key] ?? "")}
+                  defaultValue={String(initialValue.current[f.key] ?? "")}
                   maxLength={20000}
                 />
               ) : f.options ? (
                 <select
                   name={f.key}
-                  defaultValue={String(initial[f.key] ?? "")}
+                  defaultValue={String(initialValue.current[f.key] ?? "")}
                   required={f.required}
                 >
                   {f.options.map((o) => (
@@ -73,7 +81,7 @@ export default function Fields({
                 <input
                   name={f.key}
                   type={f.type ?? "text"}
-                  defaultValue={String(initial[f.key] ?? "")}
+                  defaultValue={String(initialValue.current[f.key] ?? "")}
                   required={f.required}
                   min={f.min}
                   max={f.max}
@@ -95,11 +103,16 @@ export default function Fields({
             type="button"
             className="secondary"
             onClick={onClose}
-            disabled={busy}
+            disabled={busy || externalBusy}
           >
             Отмена
           </button>
-          <button className="primary" disabled={busy || !navigator.onLine}>
+          <button
+            className="primary"
+            disabled={
+              busy || externalBusy || (!navigator.onLine && !offlineAllowed)
+            }
+          >
             {busy ? "Сохраняем…" : "Сохранить"}
           </button>
         </div>

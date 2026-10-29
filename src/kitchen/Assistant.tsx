@@ -305,6 +305,11 @@ export default function Assistant({
                 </strong>
                 <p>{p.reason}</p>
                 {mode === "menu" && (
+                  <p>
+                    {p.meal} · {p.servings} порц.
+                  </p>
+                )}
+                {mode === "menu" && (
                   <div className="form-grid">
                     <label>
                       Дата

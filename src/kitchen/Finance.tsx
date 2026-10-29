@@ -1,3 +1,4 @@
+import { useSearchParams } from "react-router-dom";
 import { useState } from "react";
 import type { ModuleProps } from "./KitchenPage";
 import Fields, { type Field } from "./Fields";
@@ -24,6 +25,7 @@ export default function Finance({
   reload,
   notify,
 }: ModuleProps & { kind: string }) {
+  const [params] = useSearchParams();
   const [dialog, setDialog] = useState<{ action: string; row?: Row } | null>(
       null,
     ),
@@ -176,6 +178,42 @@ export default function Finance({
     : rows(state, "expenses").filter((r) => str(r, "date").startsWith(month));
   return (
     <>
+      {shopping && params.get("recipe") && canEdit && (
+        <div className="notice">
+          <p>
+            Добавить ингредиенты выбранного рецепта? Если его ещё нет в плане
+            месяца, будет создан один пункт без даты, затем пересчитан общий
+            список. Существующий план не дублируется.
+          </p>
+          <button
+            className="primary"
+            disabled={busy || !navigator.onLine}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await mutate(
+                  family,
+                  "shopping_recipe",
+                  {
+                    recipe_id: params.get("recipe"),
+                    servings: params.get("servings") || 4,
+                    month: month + "-01",
+                  },
+                  crypto.randomUUID(),
+                );
+                await reload();
+                notify("План и покупки обновлены.");
+              } catch (e) {
+                notify(errorText(e));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Добавить потребность в список
+          </button>
+        </div>
+      )}
       {!shopping && (
         <div className="k-metrics">
           {[
@@ -315,6 +353,12 @@ export default function Finance({
             .filter((p) => str(p, "date").startsWith(month))
             .map((p) => (
               <div key={p.id} className="k-item">
+                <strong>
+                  {str(
+                    rows(state, "expenses").find((e) => e.id === p.expense_id),
+                    "title",
+                  ) || "Покупка"}
+                </strong>
                 <p>
                   {str(p, "date")} · {fmt(num(p, "quantity"))} {str(p, "unit")}{" "}
                   · {rub(num(p, "amount"))} ·{" "}

@@ -27,6 +27,7 @@ export async function recipeBackend(
     "202610290005_shopping_budget.sql",
     "202610290006_assistant.sql",
     "202610290007_notifications.sql",
+    "202610290008_sync_guards.sql",
   ])
     await db.exec(readFileSync(`supabase/migrations/${file}`, "utf8"));
   for (const id of [owner, child])
@@ -144,6 +145,9 @@ export async function recipeBackend(
           const name = url.pathname.split("/").pop()!,
             body = req.postDataJSON() as Record<string, unknown>;
           const keys: Record<string, string[]> = {
+            kitchen_mutate: ["p_family", "p_key", "p_action", "p_data"],
+            refresh_kitchen_notifications: ["p_family"],
+            claim_kitchen_notifications: ["p_family"],
             get_kitchen_state: ["p_family", "p_from", "p_to", "p_offset"],
             get_recipe_page: ["p_family", "p_offset"],
             save_recipe: ["p_id", "p_family", "p_data", "p_version"],
@@ -162,7 +166,25 @@ export async function recipeBackend(
         if (url.pathname.startsWith("/rest/v1/")) {
           const table = url.pathname.split("/").pop()!;
           let rows: unknown[] = [];
-          if (table === "family_members") {
+          if (table === "notifications") {
+            rows = (
+              await db.query(
+                "select * from public.notifications where family_id=$1 and user_id=$2 order by created_at desc limit 50",
+                [filter(url, "family_id"), user],
+              )
+            ).rows;
+          } else if (table === "notification_preferences") {
+            rows = (
+              await db.query(
+                "select * from public.notification_preferences where family_id=$1 and user_id=$2",
+                [filter(url, "family_id"), user],
+              )
+            ).rows;
+            if (req.headers().accept?.includes("vnd.pgrst.object")) {
+              await fulfill(route, rows[0] ?? null);
+              return;
+            }
+          } else if (table === "family_members") {
             const where = filter(url, "user_id")
               ? "m.user_id=$1"
               : "m.family_id=$1";
@@ -215,13 +237,16 @@ export async function recipeBackend(
         const prefix = "/storage/v1/object/";
         if (url.pathname.startsWith(prefix)) {
           let path = decodeURIComponent(url.pathname.slice(prefix.length));
+          const bucket = path.startsWith("sign/")
+            ? path.split("/")[1]
+            : path.split("/")[0];
           if (req.method() === "DELETE") {
             const { prefixes } = req.postDataJSON() as { prefixes: string[] };
             const removed = [];
             for (const p of prefixes) {
               const result = await db.query(
                 "delete from storage.objects where bucket_id=$1 and name=$2 returning name",
-                ["recipe-photos", p],
+                [bucket, p],
               );
               if (result.rows.length) {
                 bytes.delete(p);
@@ -232,17 +257,17 @@ export async function recipeBackend(
             return;
           }
           if (path.startsWith("sign/")) {
-            path = path.slice("sign/recipe-photos/".length);
+            path = path.split("/").slice(2).join("/");
             const found = (
               await db.query(
                 "select name from storage.objects where bucket_id=$1 and name=$2",
-                ["recipe-photos", path],
+                [bucket, path],
               )
             ).rows.length;
             if (!found) throw new Error("Фото недоступно");
             if (req.method() === "POST") {
               await fulfill(route, {
-                signedURL: `/object/sign/recipe-photos/${path}?token=test-signed`,
+                signedURL: `/object/sign/${bucket}/${path}?token=test-signed`,
               });
               return;
             }
@@ -256,7 +281,7 @@ export async function recipeBackend(
             return;
           }
           if (req.method() === "POST") {
-            path = path.slice("recipe-photos/".length);
+            path = path.split("/").slice(1).join("/");
             let buffer = req.postDataBuffer()!;
             const contentType = req.headers()["content-type"] ?? "";
             if (contentType.includes("multipart/form-data")) {
@@ -274,12 +299,12 @@ export async function recipeBackend(
             }
             const result = await db.query<{ id: string }>(
               "insert into storage.objects(bucket_id,name,owner_id) values($1,$2,$3) returning id",
-              ["recipe-photos", path, user],
+              [bucket, path, user],
             );
             bytes.set(path, buffer);
             await fulfill(route, {
               Id: result.rows[0].id,
-              Key: `recipe-photos/${path}`,
+              Key: `${bucket}/${path}`,
             });
             return;
           }

@@ -225,9 +225,11 @@ export default function RecipeView({
                     ? navigate(`/menu?recipe=${recipe.id}`)
                     : a.section === "План приготовления"
                       ? navigate(`/cooking?recipe=${recipe.id}`)
-                      : notify(
-                          `Раздел «${a.section}» ещё не реализован. Запись не создана.`,
-                        )
+                      : a.section === "Покупки"
+                        ? navigate(
+                            `/shopping?recipe=${recipe.id}&servings=${valid ? n : d.servings}`,
+                          )
+                        : navigate(`/preparations?recipe=${recipe.id}`)
                 }
               >
                 <a.icon size={17} />

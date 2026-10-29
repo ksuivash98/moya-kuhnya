@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Camera, ImagePlus, Trash2 } from "lucide-react";
 import { signedPhoto, optimizePhoto } from "./api";
-import { errorText } from "../supabase";
+import { cacheGet, cachePut } from "../offline/store";
+import { client, errorText } from "../supabase";
 export function Photo({
   path,
   blob,
@@ -25,23 +26,54 @@ export function Photo({
       return () => URL.revokeObjectURL(url);
     }
     if (!path) return;
+    let localUrl = "";
     const load = () => {
-      void signedPhoto(path)
-        .then((url) => {
+      void (async () => {
+        try {
+          const session = await client().auth.getSession();
+          const user = session.data.session?.user.id;
+          const family = (
+            path.startsWith("prep:") ? path.slice(5) : path
+          ).split("/")[0];
+          if (!navigator.onLine) {
+            if (!user) throw new Error();
+            const saved = await cacheGet<Blob>(user, family, "photo:" + path);
+            if (localUrl) URL.revokeObjectURL(localUrl);
+            localUrl = URL.createObjectURL(saved);
+            if (active) {
+              setSrc(localUrl);
+              setFailed(false);
+            }
+            return;
+          }
+          const url = await signedPhoto(path);
           if (active) {
             setSrc(url);
             setFailed(false);
           }
-        })
-        .catch(() => {
+          if (user) {
+            try {
+              await cacheGet<Blob>(user, family, "photo:" + path);
+            } catch {
+              const response = await fetch(url);
+              if (response.ok) {
+                const value = await response.blob();
+                if (value.size <= 5242880)
+                  await cachePut(user, family, "photo:" + path, value);
+              }
+            }
+          }
+        } catch {
           if (active) setFailed(true);
-        });
+        }
+      })();
     };
     load();
     const t = setInterval(load, 12 * 60 * 1000);
     return () => {
       active = false;
       clearInterval(t);
+      if (localUrl) URL.revokeObjectURL(localUrl);
     };
   }, [path, blob]);
   return src && !failed ? (

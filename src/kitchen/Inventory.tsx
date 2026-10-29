@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { client, check } from "../supabase";
+import { useSearchParams } from "react-router-dom";
+import { useState, useEffect, useCallback } from "react";
 import { Plus } from "lucide-react";
 import Fields, { type Field } from "./Fields";
 import type { ModuleProps } from "./KitchenPage";
@@ -14,7 +16,7 @@ import {
   type Row,
 } from "./model";
 import { mutate } from "./api";
-import { Photo } from "../recipes/Photos";
+import { Photo, PhotoField } from "../recipes/Photos";
 export default function Inventory({
   kind,
   state,
@@ -24,6 +26,14 @@ export default function Inventory({
   reload,
   notify,
 }: ModuleProps & { kind: string }) {
+  const [params] = useSearchParams();
+  const [photoBlob, setPhotoBlob] = useState<Blob | null | undefined>();
+  const [photoPath, setPhotoPath] = useState("");
+  const [photoBusy, setPhotoBusy] = useState(0);
+  const onPhotoBusy = useCallback(
+    (n: number) => setPhotoBusy((v) => Math.max(0, v + n)),
+    [],
+  );
   const [query, setQuery] = useState(""),
     [filter, setFilter] = useState(""),
     [page, setPage] = useState(0),
@@ -44,6 +54,11 @@ export default function Inventory({
     ],
   };
   const action = dialog?.action;
+  useEffect(() => {
+    setPhotoBlob(undefined);
+    setPhotoPath(str(dialog?.row, "photo_path"));
+    setPhotoBusy(0);
+  }, [dialog?.action, dialog?.row?.id]);
   const fields: Field[] =
     action === "place_save"
       ? [{ key: "name", label: "Название места", required: true }]
@@ -232,6 +247,28 @@ export default function Inventory({
         .includes(query.toLocaleLowerCase("ru")) &&
       (!filter || r.place_id === filter),
   );
+  useEffect(() => {
+    if (prep && canEdit && params.get("recipe")) {
+      const r = recipes.find((r) => r.id === params.get("recipe"));
+      if (r)
+        setDialog({
+          action: "prep_save",
+          row: {
+            id: crypto.randomUUID(),
+            family_id: family,
+            version: 0,
+            recipe_id: r.id,
+            title: r.data.title,
+            photo_path: r.data.photo,
+            category: "Готовые блюда",
+            quantity: 0,
+            unit: "порц.",
+            prepared_on: today(),
+            storage_recommendation: r.data.shelfLife,
+          },
+        });
+    }
+  }, [params, prep, canEdit, family]);
   const perPage = 20;
   return (
     <>
@@ -377,6 +414,7 @@ export default function Inventory({
             <thead>
               <tr>
                 <th>Дата</th>
+                <th>Продукт / заготовка</th>
                 <th>Изменение</th>
                 <th>Причина</th>
               </tr>
@@ -392,7 +430,38 @@ export default function Inventory({
                     <td>
                       {new Date(str(m, "created_at")).toLocaleString("ru-RU")}
                     </td>
-                    <td>{fmt(num(m, "quantity"))}</td>
+                    <td>
+                      {prep
+                        ? str(
+                            rows(state, "preparations").find(
+                              (p) => p.id === m.preparation_id,
+                            ),
+                            "title",
+                          )
+                        : str(
+                            products.find(
+                              (p) =>
+                                p.id ===
+                                rows(state, "stock_batches").find(
+                                  (b) => b.id === m.batch_id,
+                                )?.product_id,
+                            ),
+                            "name",
+                          )}
+                    </td>
+                    <td>
+                      {fmt(num(m, "quantity"))}{" "}
+                      {str(
+                        rows(
+                          state,
+                          prep ? "preparations" : "stock_batches",
+                        ).find(
+                          (r) =>
+                            r.id === (prep ? m.preparation_id : m.batch_id),
+                        ),
+                        "unit",
+                      )}
+                    </td>
                     <td>{str(m, "reason")}</td>
                   </tr>
                 ))}
@@ -418,6 +487,22 @@ export default function Inventory({
                     : "Партия продукта"
           }
           fields={fields}
+          externalBusy={photoBusy > 0}
+          extra={
+            prep && action === "prep_save" ? (
+              <PhotoField
+                label="Фотография заготовки"
+                path={photoPath}
+                blob={photoBlob ?? undefined}
+                disabled={false}
+                onBusy={onPhotoBusy}
+                onChange={(blob) => {
+                  setPhotoBlob(blob);
+                  if (!blob) setPhotoPath("");
+                }}
+              />
+            ) : undefined
+          }
           initial={{
             id: crypto.randomUUID(),
             name: "",
@@ -435,7 +520,28 @@ export default function Inventory({
           }}
           onClose={() => setDialog(null)}
           onSave={async (d, k) => {
-            await mutate(family, dialog.action, d, k);
+            let uploaded = "";
+            try {
+              if (action === "prep_save" && photoBlob) {
+                uploaded = `${family}/${d.id}/${crypto.randomUUID()}.jpg`;
+                const { error } = await client()
+                  .storage.from("preparation-photos")
+                  .upload(uploaded, photoBlob, {
+                    contentType: "image/jpeg",
+                    upsert: false,
+                  });
+                check(error);
+                d.photo_path = "prep:" + uploaded;
+              } else if (action === "prep_save" && photoBlob === null)
+                d.photo_path = "";
+              await mutate(family, dialog.action, d, k);
+            } catch (e) {
+              if (uploaded)
+                await client()
+                  .storage.from("preparation-photos")
+                  .remove([uploaded]);
+              throw e;
+            }
             await reload();
             notify("Операция сохранена. История и остатки обновлены.");
           }}

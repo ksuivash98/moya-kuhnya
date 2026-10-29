@@ -1,0 +1,106 @@
+-- Дополнительные проверки для очереди и прямой связи рецепта с покупками.
+insert into public.kitchen_modules values(9);
+create function public._shopping_recipe(f uuid,k uuid,d jsonb)returns jsonb language plpgsql security definer set search_path=''as $$declare r public.recipes;period date:=date_trunc('month',(d->>'month')::date)::date;begin
+ select * into r from public.recipes where id=(d->>'recipe_id')::uuid and family_id=f and deleted_at is null;if not found then raise exception 'Рецепт недоступен';end if;
+ if not exists(select 1 from public.menu_items where family_id=f and month=period and recipe_id=r.id and status not in('Отменено','Приготовлено','Сделана заготовка','Приготовлено из заготовки'))and not exists(select 1 from public.cooking_tasks where family_id=f and recipe_id=r.id and date_trunc('month',date)::date=period and status not in('Приготовлено','Отменено'))then perform public._planning_action(f,k,'menu_save',jsonb_build_object('id',gen_random_uuid(),'recipe_id',r.id,'month',period,'date','','meal','Другое','servings',d->>'servings','planned_count',1,'status','Запланировано'));end if;
+ return public._finance_action(f,k,'shopping_generate',jsonb_build_object('month',period));end$$;
+revoke all on function public._shopping_recipe(uuid,uuid,jsonb)from public,anon,authenticated;
+create or replace function public.kitchen_mutate(p_family uuid,p_key uuid,p_action text,p_data jsonb) returns jsonb language plpgsql security definer set search_path='' as $$declare previous public.kitchen_operations;result jsonb;begin
+ perform 1 from public.families where id=p_family for update;
+ if not public.can_edit_family(p_family) then raise exception 'Нет права изменять данные этой семьи';end if;
+ if p_key is null or p_data is null or jsonb_typeof(p_data)<>'object' or octet_length(p_data::text)>2000000 then raise exception 'Некорректная операция';end if;
+ select * into previous from public.kitchen_operations where family_id=p_family and id=p_key;
+ if found then if previous.action<>p_action or previous.payload_hash<>md5(p_data::text) then raise exception 'Этот идентификатор уже использован для другой операции';end if;return previous.result;end if;
+ if p_action in ('menu_save','task_save') and p_data?'recipe_version' and not exists(select 1 from public.recipes where id=(p_data->>'recipe_id')::uuid and family_id=p_family and version=(p_data->>'recipe_version')::integer) then raise exception 'Рецепт изменён с момента офлайн-копии. Обновите данные';end if;
+ if p_action='shopping_recipe' then result:=public._shopping_recipe(p_family,p_key,p_data);
+ elsif p_action in ('menu_save','menu_repeat','task_save','cook_confirm') then result:=public._planning_action(p_family,p_key,p_action,p_data);
+ elsif p_action in ('product_save','batch_save','prep_save','prep_use','place_save') and to_regprocedure('public._inventory_action(uuid,uuid,text,jsonb)') is not null then execute 'select public._inventory_action($1,$2,$3,$4)' into result using p_family,p_key,p_action,p_data;
+ elsif p_action in ('shopping_save','shopping_generate','purchase_confirm','purchase_reverse','expense_save','budget_save') and to_regprocedure('public._finance_action(uuid,uuid,text,jsonb)') is not null then execute 'select public._finance_action($1,$2,$3,$4)' into result using p_family,p_key,p_action,p_data;
+ else raise exception 'Действие недоступно. Проверьте применение миграций';end if;
+ insert into public.kitchen_operations(id,family_id,action,payload_hash,result,actor_id)values(p_key,p_family,p_action,md5(p_data::text),result,auth.uid());return result;end$$;
+
+create or replace function public._inventory_action(f uuid,k uuid,a text,d jsonb) returns jsonb language plpgsql security definer set search_path='' as $$
+declare rid uuid:=coalesce((d->>'id')::uuid,gen_random_uuid());p public.products;b public.stock_batches;pr public.preparations;r public.recipes;qty numeric;u text;pl uuid;mid uuid;oldq numeric:=0;path text;begin
+ pl:=nullif(d->>'place_id','')::uuid;if pl is not null and not exists(select 1 from public.storage_places where id=pl and family_id=f) then raise exception 'Место хранения недоступно';end if;
+ if a='place_save' then insert into public.storage_places(family_id,name)values(f,trim(d->>'name')) returning id into rid;return jsonb_build_object('id',rid);
+ elsif a='product_save' then
+  select * into p from public.products where id=rid;
+  if found and (p.family_id<>f or p.version is distinct from (d->>'version')::integer)then raise exception 'Продукт изменён на другом устройстве';end if;
+  if coalesce((d->>'archived')::boolean,false) and exists(select 1 from public.stock_batches where product_id=rid and quantity>0) then raise exception 'Сначала спишите или используйте остатки продукта';end if;
+  insert into public.products(id,family_id,name,name_key,category,minimum,unit,archived)values(rid,f,trim(d->>'name'),public.product_key(d->>'name'),coalesce(d->>'category','Другое'),public.kitchen_number(coalesce(d->>'minimum','0')),public.base_unit(coalesce(d->>'unit','шт.')),coalesce((d->>'archived')::boolean,false)) on conflict(id)do update set name=excluded.name,name_key=excluded.name_key,category=excluded.category,minimum=excluded.minimum,unit=excluded.unit,archived=excluded.archived,version=public.products.version+1;return jsonb_build_object('id',rid);
+ elsif a='batch_save' then
+  select * into b from public.stock_batches where id=rid;
+  if found and (b.family_id<>f or b.version is distinct from (d->>'version')::integer)then raise exception 'Партия изменена на другом устройстве';end if;
+  select * into p from public.products where id=(d->>'product_id')::uuid and family_id=f and not archived;if not found then raise exception 'Выберите доступный продукт';end if;
+  u:=public.base_unit(d->>'unit');qty:=public.kitchen_number(d->>'quantity')*public.unit_factor(d->>'unit');if b.id is not null then oldq:=b.quantity;if b.product_id<>p.id or b.unit<>u then raise exception 'У партии с историей нельзя менять продукт или размерность единицы';end if;end if;
+  insert into public.stock_batches(id,family_id,product_id,quantity,unit,purchased_on,expires_on,place_id,notes)values(rid,f,p.id,qty,u,(d->>'purchased_on')::date,nullif(d->>'expires_on','')::date,pl,coalesce(d->>'notes',''))on conflict(id)do update set quantity=excluded.quantity,purchased_on=excluded.purchased_on,expires_on=excluded.expires_on,place_id=excluded.place_id,notes=excluded.notes,version=public.stock_batches.version+1;
+  if qty<>oldq then insert into public.stock_movements(family_id,batch_id,quantity,reason,operation_id)values(f,rid,qty-oldq,coalesce(nullif(d->>'reason',''),'Ручная корректировка'),k);end if;return jsonb_build_object('id',rid);
+ elsif a='prep_save' then
+  select * into pr from public.preparations where id=rid;if found and (pr.family_id<>f or pr.version is distinct from(d->>'version')::integer)then raise exception 'Заготовка изменена на другом устройстве';end if;
+  if nullif(d->>'recipe_id','') is not null then select * into r from public.recipes where id=(d->>'recipe_id')::uuid and family_id=f;if not found then raise exception 'Рецепт недоступен';end if;end if;
+  path:=coalesce(d->>'photo_path',r.cover_path,'');if path<>'' then
+   if path like 'prep:%' then if substring(path from 6)!~('^'||f::text||'/'||rid::text||'/[0-9a-f-]{36}\.jpg$') or not exists(select 1 from storage.objects where bucket_id='preparation-photos' and name=substring(path from 6))then raise exception 'Фотография заготовки недоступна';end if;
+   elsif path<>coalesce(r.cover_path,'') and path<>coalesce(pr.photo_path,'') then raise exception 'Фотография недоступна';end if;
+  end if;
+  qty:=public.kitchen_number(d->>'quantity')*public.unit_factor(d->>'unit');u:=public.base_unit(d->>'unit');if pr.id is not null then oldq:=pr.quantity;if pr.unit<>u then raise exception 'Размерность заготовки с историей менять нельзя';end if;end if;
+  if u not in ('г','мл','шт.','порц.','упаковка') then raise exception 'Выберите количественную единицу заготовки';end if;
+  insert into public.preparations(id,family_id,recipe_id,title,photo_path,category,quantity,unit,prepared_on,expires_on,storage_recommendation,place_id,notes)values(rid,f,r.id,trim(d->>'title'),path,coalesce(d->>'category','Другие'),qty,u,(d->>'prepared_on')::date,nullif(d->>'expires_on','')::date,coalesce(d->>'storage_recommendation',r.shelf_life,''),pl,coalesce(d->>'notes',''))on conflict(id)do update set title=excluded.title,photo_path=excluded.photo_path,category=excluded.category,quantity=excluded.quantity,prepared_on=excluded.prepared_on,expires_on=excluded.expires_on,storage_recommendation=excluded.storage_recommendation,place_id=excluded.place_id,notes=excluded.notes,version=public.preparations.version+1;
+  if qty<>oldq then insert into public.preparation_movements(family_id,preparation_id,quantity,reason,operation_id)values(f,rid,qty-oldq,'Ручная корректировка',k);end if;return jsonb_build_object('id',rid);
+ elsif a='prep_use' then
+  select * into pr from public.preparations where id=rid and family_id=f;if not found or pr.version is distinct from(d->>'version')::integer then raise exception 'Заготовка изменена на другом устройстве';end if;
+  if d->>'reason' in ('Перемещение','Разморозка')then if pl is null then raise exception 'Выберите новое место';end if;update public.preparations set place_id=pl,expires_on=coalesce(nullif(d->>'expires_on','')::date,expires_on),version=version+1 where id=rid;qty:=0;
+  else qty:=public.kitchen_number(d->>'quantity');if qty<=0 or qty>pr.quantity then raise exception 'Количество должно быть больше нуля и не превышать остаток';end if;
+   if pr.expires_on<timezone('Asia/Yekaterinburg',now())::date and d->>'reason'='Использование' then raise exception 'Срок годности истёк. Используйте списание просроченного';end if;
+   update public.preparations set quantity=quantity-qty,version=version+1 where id=rid;
+   if d->>'reason'='Использование' then mid:=nullif(d->>'menu_id','')::uuid;if mid is not null and not exists(select 1 from public.menu_items where id=mid and family_id=f and recipe_id=pr.recipe_id and status not in ('Отменено','Приготовлено','Сделана заготовка','Приготовлено из заготовки'))then raise exception 'Пункт меню недоступен';end if;insert into public.preparation_uses(family_id,preparation_id,menu_id,quantity,used_on)values(f,rid,mid,qty,(d->>'date')::date);if mid is not null then update public.cooking_tasks set status='Приготовлено',notes=notes||E'\nИспользована готовая заготовка',version=version+1 where id=(select id from public.cooking_tasks where family_id=f and menu_id=mid and status not in('Приготовлено','Отменено')order by date,id limit 1);update public.menu_items set status=case when public.kitchen_menu_done(mid)>=planned_count then 'Приготовлено из заготовки' else 'Запланировано' end,version=version+1 where id=mid;end if;end if;
+  end if;
+  insert into public.preparation_movements(family_id,preparation_id,quantity,reason,operation_id)values(f,rid,-qty,coalesce(d->>'reason','Использование'),k);return jsonb_build_object('id',rid);
+ end if;raise exception 'Неизвестное складское действие';end$$;
+
+create or replace function public._planning_action(f uuid,k uuid,a text,d jsonb) returns jsonb language plpgsql security definer set search_path='' as $$
+declare rid uuid;eid uuid;v integer;old public.menu_items;task public.cooking_tasks;r public.recipes;qty numeric;eaten numeric;fridge numeric;frozen numeric;usage jsonb;u jsonb;needed numeric;available numeric;b record;take numeric;pid uuid;pl uuid;tid uuid;mid uuid;prepared uuid;repeat_n integer;begin
+ if a='menu_save' then
+  rid:=coalesce((d->>'id')::uuid,gen_random_uuid());select * into old from public.menu_items where id=rid;
+  if found and (old.family_id<>f or old.version is distinct from (d->>'version')::integer) then raise exception 'План изменён на другом устройстве. Обновите данные';end if;
+  select * into r from public.recipes where id=(d->>'recipe_id')::uuid and family_id=f and (deleted_at is null or id=old.recipe_id);if not found then raise exception 'Рецепт недоступен';end if;
+  if d->>'status' not in ('Запланировано','В процессе','Перенесено','Отменено') then raise exception 'Приготовление подтверждается отдельной операцией';end if;
+  if old.id is not null and exists(select 1 from public.cooking_events where menu_id=rid) and (r.id<>old.recipe_id or (d->>'servings')::numeric<>old.servings) then raise exception 'Нельзя менять рецепт и порции плана с историей; создайте новое приготовление';end if;
+  if old.id is not null and (d->>'planned_count')::integer<public.kitchen_menu_done(rid)then raise exception 'Число приготовлений не может быть меньше уже подтверждённого';end if;
+  insert into public.menu_items(id,family_id,recipe_id,title,month,date,meal,servings,planned_count,status,notes)
+  values(rid,f,r.id,r.title,date_trunc('month',coalesce(nullif(d->>'date','')::date,(d->>'month')::date))::date,nullif(d->>'date','')::date,d->>'meal',public.kitchen_number(d->>'servings'),(d->>'planned_count')::integer,d->>'status',coalesce(d->>'notes',''))
+  on conflict(id) do update set month=excluded.month,date=excluded.date,meal=excluded.meal,servings=excluded.servings,planned_count=excluded.planned_count,status=excluded.status,notes=excluded.notes,recipe_id=excluded.recipe_id,title=excluded.title,version=public.menu_items.version+1;
+  update public.menu_items set recipe_snapshot=case when old.id is not null and old.recipe_id=r.id then old.recipe_snapshot else public._recipe_snapshot(r.id) end where id=rid;return jsonb_build_object('id',rid);
+ elsif a='menu_repeat' then
+  select * into old from public.menu_items where id=(d->>'id')::uuid and family_id=f;if not found or old.version is distinct from (d->>'version')::integer then raise exception 'Обновите план';end if;
+  repeat_n:=(d->>'count')::integer;if repeat_n not between 1 and 31 then raise exception 'Количество повторов — от 1 до 31';end if;
+  if (d->>'interval')::integer not between 1 and 365 then raise exception 'Интервал — от 1 до 365 дней';end if;for v in 1..repeat_n loop insert into public.menu_items(family_id,recipe_id,title,month,date,meal,servings,status,notes) values(f,old.recipe_id,old.title,date_trunc('month',coalesce(old.date,old.month)+v*((d->>'interval')::integer))::date,coalesce(old.date,old.month)+v*((d->>'interval')::integer),old.meal,old.servings,'Запланировано',old.notes);end loop;update public.menu_items set recipe_snapshot=old.recipe_snapshot where family_id=f and recipe_id=old.recipe_id and recipe_snapshot='{}';return jsonb_build_object('count',repeat_n);
+ elsif a='task_save' then
+  rid:=coalesce((d->>'id')::uuid,gen_random_uuid());select * into task from public.cooking_tasks where id=rid;
+  if found and (task.family_id<>f or task.version is distinct from (d->>'version')::integer or task.status='Приготовлено') then raise exception 'Задача изменена или уже приготовлена';end if;
+  select * into r from public.recipes where id=(d->>'recipe_id')::uuid and family_id=f and (deleted_at is null or id=task.recipe_id);if not found then raise exception 'Рецепт недоступен';end if;
+  if jsonb_typeof(coalesce(d->'checked_steps','[]'::jsonb))<>'array'then raise exception 'Некорректные галочки шагов';end if;
+  mid:=nullif(d->>'menu_id','')::uuid;if mid is not null and not exists(select 1 from public.menu_items where id=mid and family_id=f and recipe_id=r.id and status<>'Отменено') then raise exception 'Пункт меню недоступен';end if;
+  pl:=nullif(d->>'place_id','')::uuid;if pl is not null and not exists(select 1 from public.storage_places where id=pl and family_id=f) then raise exception 'Место хранения недоступно';end if;
+  if d->>'status' not in ('Запланировано','В процессе','Отменено') then raise exception 'Используйте подтверждение приготовления';end if;
+  insert into public.cooking_tasks(id,family_id,recipe_id,menu_id,title,date,servings,planned_preparations,place_id,notes,status,checked_steps) values(rid,f,r.id,mid,r.title,(d->>'date')::date,public.kitchen_number(d->>'servings'),public.kitchen_number(coalesce(d->>'planned_preparations','0')),pl,coalesce(d->>'notes',''),d->>'status',coalesce(d->'checked_steps','[]'::jsonb)) on conflict(id) do update set date=excluded.date,servings=excluded.servings,planned_preparations=excluded.planned_preparations,place_id=excluded.place_id,notes=excluded.notes,status=excluded.status,checked_steps=excluded.checked_steps,recipe_id=excluded.recipe_id,menu_id=excluded.menu_id,title=excluded.title,version=public.cooking_tasks.version+1;update public.cooking_tasks set recipe_snapshot=case when task.id is not null and task.recipe_id=r.id then task.recipe_snapshot else public._recipe_snapshot(r.id) end where id=rid;return jsonb_build_object('id',rid);
+ elsif a='cook_confirm' then
+  tid:=nullif(d->>'task_id','')::uuid;mid:=nullif(d->>'menu_id','')::uuid;
+  if tid is not null then select * into task from public.cooking_tasks where id=tid and family_id=f;if not found or task.status in ('Приготовлено','Отменено') or task.version is distinct from (d->>'version')::integer then raise exception 'Задача изменена или уже подтверждена';end if;mid:=task.menu_id;rid:=task.recipe_id;else select * into old from public.menu_items where id=mid and family_id=f;if not found or old.version is distinct from (d->>'version')::integer or old.status in ('Отменено','Приготовлено','Сделана заготовка','Приготовлено из заготовки') then raise exception 'Обновите пункт меню';end if;rid:=old.recipe_id;end if;
+  if mid is not null and public.kitchen_menu_done(mid)>=(select planned_count from public.menu_items where id=mid) then raise exception 'Все приготовления этого пункта уже подтверждены';end if;
+  select * into r from public.recipes where id=rid and family_id=f;
+  qty:=public.kitchen_number(d->>'servings');eaten:=public.kitchen_number(d->>'eaten');fridge:=public.kitchen_number(d->>'fridge');frozen:=public.kitchen_number(d->>'frozen');if qty<=0 or qty<>eaten+fridge+frozen then raise exception 'Сумма съеденного, охлаждённого и замороженного должна равняться фактическим порциям';end if;
+  usage:=d->'usage';if jsonb_typeof(usage) is distinct from 'array' or coalesce((d->>'usage_confirmed')::boolean,false)=false then raise exception 'Подтвердите фактический расход ингредиентов';end if;
+  -- Одинаковые точные названия объединяются только с совместимой единицей.
+  for u in select jsonb_build_object('key',public.product_key(x->>'name'),'unit',public.base_unit(x->>'unit'),'amount',sum(public.kitchen_number(x->>'amount')*public.unit_factor(x->>'unit'))) from jsonb_array_elements(usage)x group by public.product_key(x->>'name'),public.base_unit(x->>'unit') loop
+   needed:=(u->>'amount')::numeric;if needed=0 then continue;end if;
+   select id into pid from public.products where family_id=f and name_key=u->>'key' and not archived;
+   select coalesce(sum(quantity),0) into available from public.stock_batches where family_id=f and product_id=pid and unit=u->>'unit' and (expires_on is null or expires_on>=timezone('Asia/Yekaterinburg',now())::date);
+   if available<needed then raise exception 'Недостаточно продукта «%»: есть %, нужно % %',u->>'key',available,needed,u->>'unit';end if;
+   for b in select * from public.stock_batches where family_id=f and product_id=pid and unit=u->>'unit' and quantity>0 and (expires_on is null or expires_on>=timezone('Asia/Yekaterinburg',now())::date) order by expires_on nulls last,purchased_on,id for update loop take:=least(needed,b.quantity);update public.stock_batches set quantity=quantity-take,version=version+1 where id=b.id;insert into public.stock_movements(family_id,batch_id,quantity,reason,operation_id) values(f,b.id,-take,'Приготовление',k);needed:=needed-take;exit when needed=0;end loop;
+  end loop;
+  eid:=gen_random_uuid();insert into public.cooking_events(id,family_id,recipe_id,menu_id,task_id,servings,eaten,fridge,frozen,recipe_snapshot,usage,notes,cooked_on) values(eid,f,r.id,mid,tid,qty,eaten,fridge,frozen,case when tid is not null then task.recipe_snapshot else old.recipe_snapshot end,usage,coalesce(d->>'notes',''),(d->>'date')::date);
+  for v in 1..2 loop take:=case v when 1 then fridge else frozen end;if take=0 then continue;end if;select id into pl from public.storage_places where family_id=f and name=case v when 1 then 'Холодильник' else 'Морозилка' end;prepared:=gen_random_uuid();insert into public.preparations(id,family_id,recipe_id,event_id,title,photo_path,quantity,prepared_on,expires_on,storage_recommendation,place_id) values(prepared,f,r.id,eid,r.title,r.cover_path,take,(d->>'date')::date,nullif(d->>case v when 1 then 'fridge_expiry' else 'frozen_expiry' end,'')::date,r.shelf_life,pl);insert into public.preparation_movements(family_id,preparation_id,quantity,reason,operation_id)values(f,prepared,take,'Приготовлено',k);end loop;
+  if tid is not null then update public.cooking_tasks set status='Приготовлено',version=version+1 where id=tid;end if;
+  if mid is not null then update public.menu_items set status=case when public.kitchen_menu_done(mid)>=planned_count then case when frozen>0 or fridge>0 then 'Сделана заготовка' else 'Приготовлено' end else 'Запланировано' end,version=version+1 where id=mid;end if;
+  return jsonb_build_object('id',eid);
+ end if;raise exception 'Неизвестное действие планирования';end$$;

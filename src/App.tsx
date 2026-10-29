@@ -1,3 +1,12 @@
+import {
+  type State as KitchenState,
+  rows as kitchenRows,
+  today as kitchenToday,
+  rub as kitchenRub,
+} from "./kitchen/model";
+import Dashboard from "./kitchen/Dashboard";
+import SyncStatus from "./offline/SyncStatus";
+import { cacheGet, cachePut, purgeUser } from "./offline/store";
 import Notifications from "./kitchen/Notifications";
 import { lazy, Suspense } from "react";
 import { useRecipeCount } from "./recipes/useRecipeCount";
@@ -353,6 +362,8 @@ export default function App() {
   const familyIdRef = useRef(familyId);
   familyIdRef.current = familyId;
   const selected = memberships.find((m) => m.family_id === familyId);
+  const [kitchenState, setKitchenState] = useState<KitchenState>();
+  useEffect(() => setKitchenState(undefined), [familyId, session?.user.id]);
   const [recipeCount, setRecipeCount] = useRecipeCount(
     familyId,
     session?.user.id,
@@ -427,6 +438,25 @@ export default function App() {
       setActivity([]);
       return;
     }
+    if (!navigator.onLine) {
+      try {
+        const cached = await cacheGet<Membership[]>(
+          session.user.id,
+          "",
+          "memberships",
+        );
+        setMemberships(cached);
+        setFamilyId((prev) =>
+          cached.some((r) => r.family_id === prev)
+            ? prev
+            : (cached[0]?.family_id ?? ""),
+        );
+      } catch (e) {
+        setLoadError(errorText(e));
+      }
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setLoadError("");
     try {
@@ -438,6 +468,7 @@ export default function App() {
       if (sessionIdRef.current !== session.user.id) return;
       const rows = (data ?? []) as unknown as Membership[];
       setMemberships(rows);
+      void cachePut(session.user.id, "", "memberships", rows).catch(() => {});
       setFamilyId((prev) =>
         rows.some((r) => r.family_id === prev)
           ? prev
@@ -456,6 +487,17 @@ export default function App() {
     if (!session || !familyId) {
       setMembers([]);
       setActivity([]);
+      return;
+    }
+    if (!navigator.onLine) {
+      try {
+        const cached = await cacheGet<{
+          members: Member[];
+          activity: Activity[];
+        }>(session.user.id, familyId, "family");
+        setMembers(cached.members);
+        setActivity(cached.activity);
+      } catch {}
       return;
     }
     try {
@@ -481,6 +523,10 @@ export default function App() {
         return;
       setMembers((m.data ?? []) as unknown as Member[]);
       setActivity(a.data ?? []);
+      void cachePut(session.user.id, familyId, "family", {
+        members: m.data,
+        activity: a.data ?? [],
+      }).catch(() => {});
     } catch (e) {
       setLoadError(errorText(e));
     }
@@ -535,6 +581,13 @@ export default function App() {
       clearInterval(t);
     };
   }, [session?.user.id, familyId, reload, loadFamily]);
+  useEffect(() => {
+    if (session && familyId)
+      sessionStorage.setItem(
+        `kitchen-current-family:${session.user.id}`,
+        familyId,
+      );
+  }, [session?.user.id, familyId]);
   const active = sections.find((s) => s.path === location.pathname);
   const name = String(session?.user.user_metadata.display_name ?? "")
     .trim()
@@ -547,6 +600,7 @@ export default function App() {
     )
       return;
     try {
+      if (session) await purgeUser(session.user.id).catch(() => {});
       const { error } = await client().auth.signOut();
       check(error);
       setFamilyId("");
@@ -683,8 +737,8 @@ export default function App() {
         {!online && (
           <div className="status-bar">
             <WifiOff size={17} />
-            Нет подключения. Доступна оболочка приложения; данные семьи требуют
-            интернета.
+            Нет подключения. Доступны ранее сохранённые данные этого устройства.
+            Покупки, списания и ИИ требуют интернета.
           </div>
         )}
         {!configured && (
@@ -699,6 +753,7 @@ export default function App() {
             </NavLink>
           </div>
         )}
+        {session && <SyncStatus key={session.user.id} user={session.user.id} />}
         <main id="main-content">
           <Routes>
             <Route
@@ -782,18 +837,48 @@ export default function App() {
                     <Stat
                       icon={<CalendarDays />}
                       label="Меню на сегодня"
-                      value="—"
-                      detail="Планирование — на этапе 3"
+                      value={
+                        kitchenState
+                          ? String(
+                              kitchenRows(kitchenState, "menu_items").filter(
+                                (m) =>
+                                  m.date === kitchenToday() &&
+                                  m.status !== "Отменено",
+                              ).length,
+                            )
+                          : "—"
+                      }
+                      detail={
+                        kitchenState
+                          ? "Запланировано на сегодня"
+                          : "Подключите планирование"
+                      }
                       color="sand"
                     />
                     <Stat
                       icon={<Wallet />}
-                      label="Бюджет месяца"
-                      value="—"
-                      detail="Учёт расходов — на этапе 5"
+                      label="Расходы месяца"
+                      value={
+                        kitchenState?.summary
+                          ? kitchenRub(Number(kitchenState.summary.spent))
+                          : "—"
+                      }
+                      detail={
+                        kitchenState?.summary
+                          ? "По финансовому журналу"
+                          : "Подключите бюджет"
+                      }
                       color="lavender"
                     />
                   </div>
+                  {session && familyId && (
+                    <Dashboard
+                      key={`${session.user.id}:${familyId}`}
+                      family={familyId}
+                      user={session.user.id}
+                      onChange={setKitchenState}
+                    />
+                  )}
                   <div className="dashboard-columns">
                     <section className="panel">
                       <div className="section-heading">
@@ -1010,51 +1095,6 @@ export default function App() {
                 </div>
               }
             />
-            {sections
-              .filter(
-                (s) =>
-                  s.stage &&
-                  ![
-                    "/recipes",
-                    "/menu",
-                    "/cooking",
-                    "/products",
-                    "/preparations",
-                  ].includes(s.path),
-              )
-              .map((s) => (
-                <Route
-                  key={s.path}
-                  path={s.path}
-                  element={
-                    <>
-                      <div className="page-heading">
-                        <div>
-                          <p className="eyebrow">ВАША СЕМЕЙНАЯ КУХНЯ</p>
-                          <h1>{s.name}</h1>
-                          <p className="muted">{s.description}</p>
-                        </div>
-                      </div>
-                      <section className="panel coming-soon">
-                        <div className="empty-icon">
-                          <s.icon size={40} />
-                        </div>
-                        <span className="pill quiet">Этап {s.stage}</span>
-                        <h2>Здесь скоро станет уютно</h2>
-                        <p>
-                          Раздел «{s.name}» в разработке.
-                          <br />
-                          Сейчас мы обустраиваем основу вашей семейной кухни.
-                        </p>
-                        <NavLink className="primary" to="/">
-                          На главную
-                          <ArrowRight size={17} />
-                        </NavLink>
-                      </section>
-                    </>
-                  }
-                />
-              ))}
             <Route
               path="*"
               element={

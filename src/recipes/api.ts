@@ -1,3 +1,4 @@
+import { cachePut, cacheGet, enqueue, queueAll } from "../offline/store";
 import { client, check } from "../supabase";
 import {
   photoPaths,
@@ -45,6 +46,17 @@ export async function loadRecipes(
   family: string,
   user: string,
 ): Promise<Recipe[]> {
+  if (!navigator.onLine) {
+    let cached = await cacheGet<Recipe[]>(user, family, "recipes");
+    for (const q of await queueAll(user))
+      if (q.family === family && q.action === "favorite")
+        cached = cached.map((r) =>
+          r.id === q.data.id
+            ? { ...r, data: { ...r.data, favorite: Boolean(q.data.value) } }
+            : r,
+        );
+    return cached;
+  }
   const data: RawRecipe[] = [];
   for (let offset = 0; ; offset += 200) {
     const { data: page, error } = await client().rpc("get_recipe_page", {
@@ -68,7 +80,9 @@ export async function loadRecipes(
     for (const item of page ?? []) ids.add(item.recipe_id);
     if (!page || page.length < 200) break;
   }
-  return [...new Map(data.map((r) => [r.id, r])).values()].map((r) => ({
+  const result: Recipe[] = [
+    ...new Map(data.map((r) => [r.id, r])).values(),
+  ].map((r) => ({
     id: r.id,
     family_id: r.family_id,
     created_at: r.created_at,
@@ -108,8 +122,23 @@ export async function loadRecipes(
         ),
     },
   }));
+  try {
+    await cachePut(user, family, "recipes", result);
+  } catch {}
+  return result;
 }
 export async function setFavorite(id: string, value: boolean) {
+  if (!navigator.onLine) {
+    const session = await client().auth.getSession();
+    const user = session.data.session?.user.id;
+    if (!user) throw new Error("Войдите в аккаунт");
+    const family = window.sessionStorage.getItem(
+      `kitchen-current-family:${user}`,
+    );
+    if (!family) throw new Error("Выберите семью");
+    await enqueue(user, family, "favorite", { id, value }, crypto.randomUUID());
+    return;
+  }
   const { error } = await client().rpc("set_recipe_favorite", {
     p_recipe: id,
     p_value: value,
