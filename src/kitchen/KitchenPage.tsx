@@ -1,3 +1,4 @@
+import Assistant from "./Assistant";
 import Finance from "./Finance";
 import Inventory from "./Inventory";
 import { useCallback, useEffect, useState } from "react";
@@ -184,7 +185,9 @@ export default function KitchenPage({
         </div>
       )}
       {state &&
-        (["shopping", "budget"].includes(kind) ? (
+        (kind === "assistant" ? (
+          <Assistant {...props} />
+        ) : ["shopping", "budget"].includes(kind) ? (
           <Finance kind={kind} {...props} />
         ) : ["products", "preparations"].includes(kind) ? (
           <Inventory kind={kind} {...props} />

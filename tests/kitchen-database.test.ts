@@ -35,6 +35,7 @@ beforeAll(async () => {
     "202610290003_planning.sql",
     "202610290004_inventory.sql",
     "202610290005_shopping_budget.sql",
+    "202610290006_assistant.sql",
   ])
     await db.exec(readFileSync("supabase/migrations/" + file, "utf8"));
   await db.query("insert into auth.users(id)values($1),($2)", [owner, other]);
@@ -339,4 +340,47 @@ test("денежные корректировки, бюджет и расчёт 
     )
   ).rows;
   expect(Number(need.find((n) => n.name === "творог")?.missing)).toBe(300);
+});
+test("ИИ-запрос повторяется без повторной резервации, предложение не пишет меню без принятия", async () => {
+  const id = crypto.randomUUID(),
+    input = { mode: "menu", from: "2099-01-01", to: "2099-01-31" };
+  const first = (await scalar("select public.reserve_ai_request($1,$2,$3)", [
+    family,
+    id,
+    input,
+  ])) as { fresh: boolean };
+  const second = (await scalar("select public.reserve_ai_request($1,$2,$3)", [
+    family,
+    id,
+    input,
+  ])) as { fresh: boolean };
+  expect(first.fresh).toBe(true);
+  expect(second.fresh).toBe(false);
+  await db.exec("reset role");
+  await db.query(
+    "update public.ai_requests set status='ready',result=$2 where id=$1",
+    [id, { summary: "Тест", items: [] }],
+  );
+  await user();
+  const key = crypto.randomUUID(),
+    items = [
+      { recipe_id: recipe, date: "2099-01-10", meal: "Ужин", servings: 2 },
+    ];
+  await scalar("select public.apply_ai_menu($1,$2,$3,$4)", [
+    family,
+    id,
+    key,
+    items,
+  ]);
+  await scalar("select public.apply_ai_menu($1,$2,$3,$4)", [
+    family,
+    id,
+    key,
+    items,
+  ]);
+  expect(
+    await scalar(
+      "select count(*)::int from public.menu_items where date='2099-01-10'",
+    ),
+  ).toBe(1);
 });

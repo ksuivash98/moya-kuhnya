@@ -935,6 +935,7 @@ export default function App() {
               "preparations",
               "shopping",
               "budget",
+              "assistant",
             ].map((kind) => (
               <Route
                 key={kind}
