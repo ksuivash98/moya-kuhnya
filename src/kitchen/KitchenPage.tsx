@@ -1,3 +1,4 @@
+import Finance from "./Finance";
 import Inventory from "./Inventory";
 import { useCallback, useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
@@ -182,11 +183,14 @@ export default function KitchenPage({
           <button onClick={() => void reload()}>Повторить</button>
         </div>
       )}
-      {state && ["products", "preparations"].includes(kind) ? (
-        <Inventory kind={kind} {...props} />
-      ) : (
-        <Planning kind={kind} {...props} />
-      )}
+      {state &&
+        (["shopping", "budget"].includes(kind) ? (
+          <Finance kind={kind} {...props} />
+        ) : ["products", "preparations"].includes(kind) ? (
+          <Inventory kind={kind} {...props} />
+        ) : (
+          <Planning kind={kind} {...props} />
+        ))}
     </>
   );
 }

@@ -928,7 +928,14 @@ export default function App() {
                 </Suspense>
               }
             />
-            {["menu", "cooking", "products", "preparations"].map((kind) => (
+            {[
+              "menu",
+              "cooking",
+              "products",
+              "preparations",
+              "shopping",
+              "budget",
+            ].map((kind) => (
               <Route
                 key={kind}
                 path={`/${kind}`}

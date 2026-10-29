@@ -34,6 +34,7 @@ beforeAll(async () => {
     "202610280002_recipes.sql",
     "202610290003_planning.sql",
     "202610290004_inventory.sql",
+    "202610290005_shopping_budget.sql",
   ])
     await db.exec(readFileSync("supabase/migrations/" + file, "utf8"));
   await db.query("insert into auth.users(id)values($1),($2)", [owner, other]);
@@ -260,4 +261,82 @@ test("ручная партия и корректировки сохраняют
       ),
     ),
   ).toBe(1500);
+});
+test("покупка оприходует фактическое количество и расход один раз; компенсация сохраняет журнал", async () => {
+  const product = (
+    await db.query<{ id: string }>(
+      "select id from public.products where name='Мука'",
+    )
+  ).rows[0].id;
+  const item = crypto.randomUUID();
+  await op("shopping_save", {
+    id: item,
+    product_id: product,
+    quantity: 2,
+    unit: "кг",
+    month: "2099-01-01",
+    status: "open",
+  });
+  const key = crypto.randomUUID(),
+    d = {
+      id: item,
+      version: 1,
+      quantity: 3,
+      unit: "кг",
+      amount: "300.10",
+      date: "2099-01-05",
+    };
+  await op("purchase_confirm", d, key);
+  await op("purchase_confirm", d, key);
+  expect(await scalar("select count(*)::int from public.purchases")).toBe(1);
+  expect(
+    Number(
+      await scalar(
+        "select quantity from public.stock_batches where notes='Покупка'",
+      ),
+    ),
+  ).toBe(3000);
+  expect(
+    Number(await scalar("select sum(amount)from public.financial_movements")),
+  ).toBe(300.1);
+  const buy = (await scalar("select id from public.purchases")) as string;
+  await op("purchase_reverse", { id: buy });
+  expect(
+    Number(await scalar("select sum(amount)from public.financial_movements")),
+  ).toBe(0);
+  expect(
+    await scalar("select count(*)::int from public.financial_movements"),
+  ).toBe(2);
+});
+test("денежные корректировки, бюджет и расчёт потребности точны", async () => {
+  const expense = crypto.randomUUID();
+  await op("expense_save", {
+    id: expense,
+    title: "Продукты",
+    category: "Другое",
+    amount: "0.10",
+    date: "2099-01-02",
+  });
+  await op("expense_save", {
+    id: expense,
+    version: 1,
+    title: "Продукты",
+    category: "Другое",
+    amount: "0.30",
+    date: "2099-01-02",
+  });
+  await op("budget_save", { month: "2099-01-01", amount: 100 });
+  const summary = (await scalar(
+    "select public.kitchen_finance_summary($1,$2,$3)",
+    [family, "2099-01-01", "2099-01-31"],
+  )) as { spent: number; remaining: number };
+  expect(Number(summary.spent)).toBe(0.3);
+  expect(Number(summary.remaining)).toBe(99.7);
+  const need = (
+    await db.query<{ name: string; missing: string }>(
+      "select * from public.kitchen_requirements($1,$2)",
+      [family, "2099-01-01"],
+    )
+  ).rows;
+  expect(Number(need.find((n) => n.name === "творог")?.missing)).toBe(300);
 });

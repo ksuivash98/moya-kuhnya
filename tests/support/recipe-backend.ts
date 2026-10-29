@@ -24,6 +24,7 @@ export async function recipeBackend(
     "202610280002_recipes.sql",
     "202610290003_planning.sql",
     "202610290004_inventory.sql",
+    "202610290005_shopping_budget.sql",
   ])
     await db.exec(readFileSync(`supabase/migrations/${file}`, "utf8"));
   for (const id of [owner, child])
