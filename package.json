@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:ui": "playwright test",
     "build:pages": "npm run build && node scripts/prepare-pages.mjs",
-    "test:pages": "playwright test --config=playwright.pages.config.ts"
+    "test:pages": "playwright test --config=playwright.pages.config.ts",
+    "build:edge-editor": "node scripts/build-recipe-import-editor.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.99.2",
