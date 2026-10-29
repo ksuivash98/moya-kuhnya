@@ -1,3 +1,4 @@
+import Analytics from "./Analytics";
 import Assistant from "./Assistant";
 import Finance from "./Finance";
 import Inventory from "./Inventory";
@@ -185,7 +186,9 @@ export default function KitchenPage({
         </div>
       )}
       {state &&
-        (kind === "assistant" ? (
+        (kind === "analytics" ? (
+          <Analytics {...props} />
+        ) : kind === "assistant" ? (
           <Assistant {...props} />
         ) : ["shopping", "budget"].includes(kind) ? (
           <Finance kind={kind} {...props} />

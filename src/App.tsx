@@ -1,3 +1,4 @@
+import Notifications from "./kitchen/Notifications";
 import { lazy, Suspense } from "react";
 import { useRecipeCount } from "./recipes/useRecipeCount";
 import Modal from "./components/Modal";
@@ -630,6 +631,13 @@ export default function App() {
             <strong>{active?.name ?? "Страница"}</strong>
           </div>
           <div className="top-actions">
+            {session && familyId && (
+              <Notifications
+                key={`${session.user.id}:${familyId}`}
+                family={familyId}
+                userId={session.user.id}
+              />
+            )}
             <span className="today">
               {new Intl.DateTimeFormat("ru-RU", {
                 day: "numeric",
@@ -936,6 +944,7 @@ export default function App() {
               "shopping",
               "budget",
               "assistant",
+              "analytics",
             ].map((kind) => (
               <Route
                 key={kind}

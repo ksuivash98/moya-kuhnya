@@ -36,6 +36,7 @@ beforeAll(async () => {
     "202610290004_inventory.sql",
     "202610290005_shopping_budget.sql",
     "202610290006_assistant.sql",
+    "202610290007_notifications.sql",
   ])
     await db.exec(readFileSync("supabase/migrations/" + file, "utf8"));
   await db.query("insert into auth.users(id)values($1),($2)", [owner, other]);
@@ -383,4 +384,30 @@ test("ИИ-запрос повторяется без повторной рез�
       "select count(*)::int from public.menu_items where date='2099-01-10'",
     ),
   ).toBe(1);
+});
+test("напоминания не дублируются и доступны только своему пользователю", async () => {
+  await db.query("select public.refresh_kitchen_notifications($1)", [family]);
+  await db.query("select public.refresh_kitchen_notifications($1)", [family]);
+  await db.exec("reset role");
+  await db.exec(
+    "update public.stock_batches set expires_on=(timezone('Asia/Yekaterinburg',now())::date)+1 where quantity>0",
+  );
+  await user();
+  await db.query("select public.refresh_kitchen_notifications($1)", [family]);
+  const n = Number(
+    await scalar("select count(*)::int from public.notifications"),
+  );
+  expect(n).toBeGreaterThan(0);
+  await db.query("select public.refresh_kitchen_notifications($1)", [family]);
+  expect(
+    Number(await scalar("select count(*)::int from public.notifications")),
+  ).toBe(n);
+  await user(other);
+  expect(await scalar("select count(*)::int from public.notifications")).toBe(
+    0,
+  );
+  await expect(
+    db.query("select public.refresh_kitchen_notifications($1)", [family]),
+  ).rejects.toThrow("недоступна");
+  await user();
 });

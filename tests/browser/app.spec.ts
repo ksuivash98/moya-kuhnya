@@ -36,16 +36,25 @@ test("тема сохраняется после перезагрузки", asyn
   await page.getByRole("button", { name: "Включить светлую тему" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 });
-test("маршруты следующих этапов честно показывают статус разработки", async ({
+test("новые разделы честно требуют подключение; неизвестная страница обрабатывается", async ({
   page,
 }) => {
-  for (const path of ["/shopping", "/budget", "/assistant", "/analytics"]) {
-    await page.goto(path);
+  for (const [path, title] of [
+    ["menu", "Меню"],
+    ["cooking", "План приготовления"],
+    ["products", "Мои продукты"],
+    ["preparations", "Заготовки"],
+    ["shopping", "Покупки"],
+    ["budget", "Бюджет"],
+    ["assistant", "Помощник"],
+    ["analytics", "Аналитика"],
+  ]) {
+    await page.goto("/" + path);
     await expect(
-      page.getByRole("heading", { name: "Здесь скоро станет уютно" }),
+      page.getByRole("heading", { name: title, exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByText("в разработке.", { exact: false }),
+      page.getByRole("heading", { name: "Подключите Supabase", exact: true }),
     ).toBeVisible();
   }
   await page.goto("/missing");
