@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import "./photos.css";
+import { useEffect, useState, useRef } from "react";
 import { Camera, ImagePlus, Trash2 } from "lucide-react";
+import Modal from "../components/Modal";
 import { signedPhoto, optimizePhoto } from "./api";
 import { cacheGet, cachePut } from "../offline/store";
 import { client, errorText } from "../supabase";
@@ -8,16 +10,25 @@ export function Photo({
   blob,
   alt,
   className = "",
+  zoomable = false,
 }: {
   path: string;
   blob?: Blob;
   alt: string;
   className?: string;
+  zoomable?: boolean;
 }) {
+  const trigger = useRef<HTMLButtonElement>(null);
+  const closePhoto = () => {
+    setOpen(false);
+    requestAnimationFrame(() => trigger.current?.focus());
+  };
   const [src, setSrc] = useState(""),
-    [failed, setFailed] = useState(false);
+    [failed, setFailed] = useState(false),
+    [open, setOpen] = useState(false);
   useEffect(() => {
     let active = true;
+    setOpen(false);
     setSrc("");
     setFailed(false);
     if (blob) {
@@ -77,13 +88,39 @@ export function Photo({
     };
   }, [path, blob]);
   return src && !failed ? (
-    <img
-      className={`recipe-photo ${className}`}
-      src={src}
-      alt={alt}
-      loading="lazy"
-      onError={() => setFailed(true)}
-    />
+    <>
+      {zoomable ? (
+        <button
+          type="button"
+          className="photo-open"
+          ref={trigger}
+          aria-label={`Открыть фото: ${alt}`}
+          onClick={() => setOpen(true)}
+        >
+          <img
+            className={`recipe-photo ${className}`}
+            src={src}
+            alt={alt}
+            loading="lazy"
+            onError={() => setFailed(true)}
+          />
+          <span className="photo-open-hint">Посмотреть целиком</span>
+        </button>
+      ) : (
+        <img
+          className={`recipe-photo ${className}`}
+          src={src}
+          alt={alt}
+          loading="lazy"
+          onError={() => setFailed(true)}
+        />
+      )}
+      {open && (
+        <Modal title={alt} className="photo-viewer-dialog" onClose={closePhoto}>
+          <img className="photo-viewer-image" src={src} alt={alt} />
+        </Modal>
+      )}
+    </>
   ) : (
     <div
       className={`recipe-photo photo-placeholder ${className}`}
@@ -121,7 +158,7 @@ export function PhotoField({
   return (
     <div className="photo-field">
       <span className="field-label">{label}</span>
-      {(path || blob) && <Photo path={path} blob={blob} alt={label} />}
+      {(path || blob) && <Photo path={path} blob={blob} alt={label} zoomable />}
       <div className="photo-buttons">
         <label
           className={`secondary upload-button ${disabled ? "disabled" : ""}`}
@@ -169,7 +206,8 @@ export function PhotoField({
         )}
       </div>
       <small className="muted">
-        JPEG, PNG, WebP до 20 МБ. Оптимизация до 1600 пикселей перед загрузкой.
+        JPEG, PNG, WebP до 20 МБ. Фото сохраняется целиком с уменьшением до 1600
+        пикселей. Нажмите на снимок для крупного просмотра.
       </small>
       {error && (
         <p className="error" role="alert">

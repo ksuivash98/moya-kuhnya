@@ -88,7 +88,7 @@ export default function RecipeView({
           )}
         </div>
       </div>
-      <Photo path={d.photo} alt={d.title} className="detail-cover" />
+      <Photo path={d.photo} alt={d.title} className="detail-cover" zoomable />
       <div className="detail-meta">
         <span>
           <Clock size={17} />
@@ -164,7 +164,9 @@ export default function RecipeView({
                 <span className="step-number">{i + 1}</span>
                 <div>
                   <p>{s.text}</p>
-                  {s.photo && <Photo path={s.photo} alt={`Шаг ${i + 1}`} />}
+                  {s.photo && (
+                    <Photo path={s.photo} alt={`Шаг ${i + 1}`} zoomable />
+                  )}
                 </div>
               </li>
             ))}

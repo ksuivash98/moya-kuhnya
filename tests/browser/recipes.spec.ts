@@ -734,3 +734,113 @@ test("заморозка без миграции: понятная ошибка 
     await backend.close();
   }
 });
+
+test("фотографии целиком: вертикальная обложка, широкий шаг, крупный просмотр и карточки", async ({
+  page,
+}) => {
+  const backend = await recipeBackend(page);
+  try {
+    await startForm(page);
+    await page
+      .getByLabel("Название рецепта *", { exact: true })
+      .fill("Фото без обрезки");
+    await page.getByLabel("Ингредиент 1", { exact: true }).fill("Мука");
+    await page
+      .getByLabel("Количество ингредиента 1", { exact: true })
+      .fill("100");
+    await page
+      .getByLabel("Описание шага 1", { exact: true })
+      .fill("Приготовить.");
+    for (const [label, width, height] of [
+      ["Фотография блюда", 600, 1200],
+      ["Фото шага 1", 1200, 400],
+    ] as const) {
+      const png = await page.evaluate(
+        ({ width, height }) => {
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d")!;
+          ctx.fillStyle = "#eac";
+          ctx.fillRect(0, 0, width, height);
+          ctx.fillStyle = "#285";
+          ctx.fillRect(0, 0, width, 40);
+          ctx.fillStyle = "#82e";
+          ctx.fillRect(0, height - 40, width, 40);
+          return canvas.toDataURL("image/png").split(",")[1];
+        },
+        { width, height },
+      );
+      await page
+        .getByLabel(label, { exact: true })
+        .setInputFiles({
+          name: "photo.png",
+          mimeType: "image/png",
+          buffer: Buffer.from(png, "base64"),
+        });
+      const img = page.getByRole("img", { name: label, exact: true });
+      await expect(img).toBeVisible();
+      await expect(img).toHaveCSS("object-fit", "contain");
+      await page
+        .getByRole("button", { name: `Открыть фото: ${label}`, exact: true })
+        .click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      const full = dialog.locator("img");
+      await expect(full).toHaveCSS("object-fit", "contain");
+      await expect
+        .poll(() =>
+          full.evaluate(
+            (img: HTMLImageElement) => img.naturalWidth / img.naturalHeight,
+          ),
+        )
+        .toBe(width / height);
+      expect(await dialog.evaluate((d) => d.scrollWidth <= d.clientWidth)).toBe(
+        true,
+      );
+      await page.keyboard.press("Escape");
+      await expect(dialog).not.toBeVisible();
+    }
+    await page
+      .getByRole("button", { name: "Сохранить рецепт", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Фото без обрезки", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator("img.detail-cover")).toHaveCSS(
+      "object-fit",
+      "contain",
+    );
+    await page
+      .getByRole("button", {
+        name: "Открыть фото: Фото без обрезки",
+        exact: true,
+      })
+      .click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Закрыть", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", {
+        name: "Открыть фото: Фото без обрезки",
+        exact: true,
+      }),
+    ).toBeFocused();
+    await page
+      .getByRole("button", { name: "Ко всем рецептам", exact: true })
+      .click();
+    await expect(page.locator(".recipe-card img")).toHaveCSS(
+      "object-fit",
+      "contain",
+    );
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  } finally {
+    await backend.close();
+  }
+});
