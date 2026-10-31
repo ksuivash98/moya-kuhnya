@@ -19,6 +19,7 @@ type RawRecipe = {
   servings: number;
   difficulty: string;
   can_freeze: boolean;
+  freeze_instructions?: string;
   shelf_life: string;
   storage_conditions: string;
   thaw_instructions: string;
@@ -98,6 +99,7 @@ export async function loadRecipes(
       servings: r.servings,
       difficulty: r.difficulty,
       freeze: r.can_freeze,
+      freezeInstructions: r.freeze_instructions ?? "",
       shelfLife: r.shelf_life,
       storage: r.storage_conditions,
       thaw: r.thaw_instructions,
@@ -220,12 +222,26 @@ export async function saveRecipe(
       if (slot === "cover") next.photo = path;
       else next.steps.find((s) => s.id === slot)!.photo = path;
     }
-    const { data: result, error } = await client().rpc("save_recipe", {
-      p_id: id,
-      p_family: family,
-      p_data: next,
-      p_version: version,
-    });
+    const saveWithFreezing = Boolean(
+      next.freezeInstructions || oldData?.freezeInstructions,
+    );
+    const { data: result, error } = await client().rpc(
+      saveWithFreezing ? "save_recipe_with_freezing" : "save_recipe",
+      {
+        p_id: id,
+        p_family: family,
+        p_data: next,
+        p_version: version,
+      },
+    );
+    if (
+      saveWithFreezing &&
+      error &&
+      (error.code === "PGRST202" || error.code === "42883")
+    )
+      throw new Error(
+        "Для сохранения инструкции по заморозке примените миграцию 010 в Supabase. Рецепт не сохранён; ваши изменения остаются в форме.",
+      );
     check(error);
     const retained = new Set(photoPaths(next));
     const removed = oldData

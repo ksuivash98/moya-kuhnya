@@ -73,7 +73,23 @@ test("полная форма: фото, ингредиенты, шаги, со�
     await expect(
       page.getByLabel("Описание шага 1", { exact: true }),
     ).toHaveValue("Обжарить сырники");
+    await expect(
+      page.getByLabel("Как замораживать", { exact: true }),
+    ).toHaveCount(0);
     await page.getByLabel("Можно замораживать", { exact: true }).check();
+    await page
+      .getByLabel("Как замораживать", { exact: true })
+      .fill("Разложить порциями в контейнеры.\nПодписать дату заморозки.");
+    await page.getByLabel("Можно замораживать", { exact: true }).uncheck();
+    await expect(
+      page.getByLabel("Как замораживать", { exact: true }),
+    ).toHaveCount(0);
+    await page.getByLabel("Можно замораживать", { exact: true }).check();
+    await expect(
+      page.getByLabel("Как замораживать", { exact: true }),
+    ).toHaveValue(
+      "Разложить порциями в контейнеры.\nПодписать дату заморозки.",
+    );
     await page
       .getByLabel("Рекомендуемый срок хранения", { exact: true })
       .fill("3 дня");
@@ -98,6 +114,12 @@ test("полная форма: фото, ингредиенты, шаги, со�
     await expect(
       page.getByRole("heading", { name: "Сырники для семьи", exact: true }),
     ).toBeVisible();
+    await expect(
+      page.getByText(
+        "Разложить порциями в контейнеры. Подписать дату заморозки.",
+        { exact: true },
+      ),
+    ).toBeVisible();
     await page.getByLabel("Пересчитать на порции", { exact: true }).fill("8");
     await expect(page.getByText("1 000 г", { exact: true })).toBeVisible();
     await expect(page.getByText("4 шт.", { exact: true })).toBeVisible();
@@ -113,6 +135,11 @@ test("полная форма: фото, ингредиенты, шаги, со�
     await page
       .getByRole("button", { name: "Редактировать", exact: true })
       .click();
+    await expect(
+      page.getByLabel("Как замораживать", { exact: true }),
+    ).toHaveValue(
+      "Разложить порциями в контейнеры.\nПодписать дату заморозки.",
+    );
     await expect(
       page.getByLabel("Рекомендуемый срок хранения", { exact: true }),
     ).toHaveValue("3 дня");
@@ -135,6 +162,12 @@ test("полная форма: фото, ингредиенты, шаги, со�
     await page.reload();
     await expect(
       page.getByRole("heading", { name: "Нежные сырники", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "Разложить порциями в контейнеры. Подписать дату заморозки.",
+        { exact: true },
+      ),
     ).toBeVisible();
     const result = await backend.query<{ amount: string }>(
       "select amount::text from public.recipe_ingredients where name=$1",
@@ -653,6 +686,51 @@ test("импорт: готовый результат восстанавлива
     ).toHaveLength(0);
   } finally {
     await page.close();
+    await backend.close();
+  }
+});
+
+test("заморозка без миграции: понятная ошибка и сохранение текста в форме", async ({
+  page,
+}) => {
+  const backend = await recipeBackend(page);
+  try {
+    await page.route("**/rest/v1/rpc/save_recipe_with_freezing", (r) =>
+      r.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: "PGRST202",
+          message: "Function not found",
+        }),
+      }),
+    );
+    await startForm(page);
+    await page
+      .getByLabel("Название рецепта *", { exact: true })
+      .fill("Заготовка");
+    await page.getByLabel("Ингредиент 1", { exact: true }).fill("Мука");
+    await page
+      .getByLabel("Количество ингредиента 1", { exact: true })
+      .fill("100");
+    await page
+      .getByLabel("Описание шага 1", { exact: true })
+      .fill("Приготовить.");
+    await page.getByLabel("Можно замораживать", { exact: true }).check();
+    await page
+      .getByLabel("Как замораживать", { exact: true })
+      .fill("Разложить по порциям.");
+    await page
+      .getByRole("button", { name: "Сохранить рецепт", exact: true })
+      .click();
+    await expect(page.getByRole("alert")).toContainText("миграцию 010");
+    await expect(
+      page.getByLabel("Как замораживать", { exact: true }),
+    ).toHaveValue("Разложить по порциям.");
+    expect(
+      (await backend.query("select id from public.recipes")).rows,
+    ).toHaveLength(0);
+  } finally {
     await backend.close();
   }
 });

@@ -32,7 +32,13 @@ const save = (
   v: number | null = version,
   recipe = id,
   f = family,
-) => db.query("select public.save_recipe($1,$2,$3,$4)", [recipe, f, d, v]);
+) =>
+  db.query("select public.save_recipe_with_freezing($1,$2,$3,$4)", [
+    recipe,
+    f,
+    d,
+    v,
+  ]);
 beforeAll(async () => {
   db = new PGlite();
   await db.exec(
@@ -43,6 +49,12 @@ beforeAll(async () => {
   );
   await db.exec(
     readFileSync("supabase/migrations/202610280002_recipes.sql", "utf8"),
+  );
+  await db.exec(
+    readFileSync(
+      "supabase/migrations/202610310010_recipe_freezing.sql",
+      "utf8",
+    ),
   );
   for (const id of [owner, adult, stranger, child])
     await db.query("insert into auth.users(id) values($1)", [id]);
@@ -76,6 +88,7 @@ beforeAll(async () => {
     cook: 20,
     servings: 4,
     freeze: true,
+    freezeInstructions: "Разложить по порциям и упаковать.",
     shelfLife: "3 дня",
     storage: "В холодильнике",
     thaw: "Разогреть",
@@ -107,6 +120,12 @@ describe("Этап 2 — транзакции, сохранение, RLS и пр
     expect(
       await scalar("select title from public.recipes where id=$1", [id]),
     ).toBe("Сырники");
+    expect(
+      await scalar(
+        "select freeze_instructions from public.recipes where id=$1",
+        [id],
+      ),
+    ).toBe("Разложить по порциям и упаковать.");
     expect(
       await scalar("select shelf_life from public.recipes where id=$1", [id]),
     ).toBe("3 дня");
@@ -424,4 +443,60 @@ describe("Этап 2 — транзакции, сохранение, RLS и пр
       "permission denied",
     );
   });
+});
+
+test("инструкция заморозки: совместимость, удаление, лимит и изоляция семей", async () => {
+  await user(owner);
+  const rid = crypto.randomUUID();
+  const d = {
+    ...data,
+    photo: "",
+    favorite: false,
+    freezeInstructions: "Упаковать порциями",
+    ingredients: data.ingredients.map((i) => ({
+      ...i,
+      id: crypto.randomUUID(),
+    })),
+    steps: data.steps.map((s) => ({
+      ...s,
+      id: crypto.randomUUID(),
+      photo: "",
+    })),
+  };
+  await save(d, null, rid);
+  const legacy = { ...d };
+  delete (legacy as Partial<RecipeData>).freezeInstructions;
+  await db.query("select public.save_recipe($1,$2,$3,$4)", [
+    rid,
+    family,
+    legacy,
+    1,
+  ]);
+  expect(
+    await scalar("select freeze_instructions from public.recipes where id=$1", [
+      rid,
+    ]),
+  ).toBe("Упаковать порциями");
+  await expect(
+    save({ ...d, freezeInstructions: "x".repeat(10001) }, 2, rid),
+  ).rejects.toThrow("10000");
+  await user(stranger);
+  await expect(
+    save({ ...d, freezeInstructions: "Чужая инструкция" }, 2, rid),
+  ).rejects.toThrow("Нет права");
+  expect(
+    await scalar("select count(*)::int from public.recipes where id=$1", [rid]),
+  ).toBe(0);
+  await user(owner);
+  expect(
+    await scalar("select freeze_instructions from public.recipes where id=$1", [
+      rid,
+    ]),
+  ).toBe("Упаковать порциями");
+  await save({ ...d, freezeInstructions: "" }, 2, rid);
+  expect(
+    await scalar("select freeze_instructions from public.recipes where id=$1", [
+      rid,
+    ]),
+  ).toBe("");
 });

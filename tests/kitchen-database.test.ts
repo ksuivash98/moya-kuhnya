@@ -39,6 +39,7 @@ beforeAll(async () => {
     "202610290007_notifications.sql",
     "202610290008_sync_guards.sql",
     "202610290009_recipe_import.sql",
+    "202610310010_recipe_freezing.sql",
   ])
     await db.exec(readFileSync("supabase/migrations/" + file, "utf8"));
   await db.query("insert into auth.users(id)values($1),($2)", [owner, other]);

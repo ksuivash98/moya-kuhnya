@@ -619,6 +619,24 @@ export default function RecipeForm({
                 />
                 Можно замораживать
               </label>
+              {data.freeze && (
+                <label>
+                  Как замораживать
+                  <textarea
+                    aria-label="Как замораживать"
+                    maxLength={10000}
+                    value={data.freezeInstructions ?? ""}
+                    onChange={(e) =>
+                      change("freezeInstructions", e.target.value)
+                    }
+                    placeholder="Опишите подготовку, упаковку и порядок заморозки этого блюда"
+                  />
+                  <small>
+                    Укажите проверенный способ для этого рецепта. Инструкция не
+                    заполняется автоматически.
+                  </small>
+                </label>
+              )}
               <label>
                 Рекомендуемый срок хранения
                 <input

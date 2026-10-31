@@ -44,6 +44,7 @@ export type RecipeData = {
   ingredients: Ingredient[];
   steps: Step[];
   freeze: boolean;
+  freezeInstructions: string;
   shelfLife: string;
   storage: string;
   thaw: string;
@@ -83,6 +84,7 @@ export const blankRecipe = (): RecipeData => ({
   ingredients: [blankIngredient()],
   steps: [blankStep()],
   freeze: false,
+  freezeInstructions: "",
   shelfLife: "",
   storage: "",
   thaw: "",
@@ -105,6 +107,8 @@ export function quantity(
   );
 }
 export function validate(data: RecipeData): string | null {
+  if ((data.freezeInstructions ?? "").length > 10000)
+    return "Инструкция по заморозке: максимум 10000 символов.";
   if (!data.title.trim() || data.title.length > 200)
     return "Укажите название до 200 символов.";
   if (

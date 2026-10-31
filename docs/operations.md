@@ -72,3 +72,8 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:pages
 Если браузера нет: `npx playwright install chromium`, затем уберите переменную пути. Браузерные команды выполняйте последовательно — они собирают один dist. Для проверки Edge Function: `deno check --node-modules-dir=manual supabase/functions/kitchen-assistant/index.ts` с установленным Deno. GitHub Pages собирается с BASE_URL проекта. Ручная публикация — `npm run build` (корневой SPA-хостинг) или `VITE_BASE_PATH=/moya-kuhnya/ npm run build:pages`.
 
 Android/компьютер: открыть HTTPS-сайт → меню браузера → «Установить приложение». iPhone: Safari → «Поделиться» → «На экран Домой». Установка не обязательна для обычной веб-версии. Manifest/service worker и desktop/mobile-представления проверяются автоматикой; установка на физические телефоны остаётся ручной проверкой.
+
+
+## Обновление 010 — заморозка рецептов
+
+Для поля «Как замораживать» примените `supabase/migrations/202610310010_recipe_freezing.sql` один раз через SQL Editor либо штатный CLI для базы с историей миграций. Это аддитивная миграция; инструкции существующих рецептов изначально пустые. Автоматически на живой базе при публикации сайта она не выполняется. Подробности — в [инструкции рецептов](recipes.md#инструкция-по-заморозке).

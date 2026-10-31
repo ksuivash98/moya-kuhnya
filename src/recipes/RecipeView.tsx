@@ -177,6 +177,14 @@ export default function RecipeView({
           <dl>
             <dt>Можно замораживать</dt>
             <dd>{d.freeze ? "Да" : "Нет"}</dd>
+            {d.freeze && (
+              <>
+                <dt>Как замораживать</dt>
+                <dd>
+                  {d.freezeInstructions || "Инструкция пока не добавлена"}
+                </dd>
+              </>
+            )}
             <dt>Срок хранения</dt>
             <dd>{d.shelfLife || "Не указан"}</dd>
             <dt>Условия</dt>
