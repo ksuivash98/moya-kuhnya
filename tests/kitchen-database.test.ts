@@ -42,6 +42,7 @@ beforeAll(async () => {
     "202610310010_recipe_freezing.sql",
     "202610310011_shopping_categories.sql",
     "202610310012_clear_shopping.sql",
+    "202610310013_clear_planning.sql",
   ]) {
     if (file === "202610310011_shopping_categories.sql")
       await db.exec(`
@@ -839,3 +840,144 @@ test("очистка покупок атомарна, повторяема и с
   await expect(op("shopping_clear", payload)).rejects.toThrow("Нет права");
   await user();
 });
+
+test.each(["menu_clear", "cooking_clear"])(
+  "%s: отменяет весь месяц атомарно, сохраняя готовку и связанные записи",
+  async (action) => {
+    await user();
+    const isMenu = action === "menu_clear";
+    const table = isMenu ? "menu_items" : "cooking_tasks";
+    const addMenu = async (period = "2098-05-01") => {
+      const id = crypto.randomUUID();
+      await op("menu_save", {
+        id,
+        recipe_id: recipe,
+        month: period,
+        date: "",
+        meal: "Ужин",
+        servings: 4,
+        planned_count: 1,
+        status: "Запланировано",
+      });
+      return { id, version: 1 };
+    };
+    const linkedMenu = isMenu ? null : await addMenu();
+    const add = async (period = "2098-05-01", linked = false) => {
+      if (isMenu) return addMenu(period);
+      const id = crypto.randomUUID();
+      await op("task_save", {
+        id,
+        recipe_id: recipe,
+        date: period,
+        servings: 4,
+        status: "Запланировано",
+        planned_preparations: 0,
+        menu_id: linked ? linkedMenu!.id : "",
+      });
+      return { id, version: 1 };
+    };
+    const items = [];
+    for (let i = 0; i < 25; i++) items.push(await add("2098-05-01", i === 0));
+    let linkedTask: string | null = null;
+    if (isMenu) {
+      linkedTask = crypto.randomUUID();
+      await op("task_save", {
+        id: linkedTask,
+        recipe_id: recipe,
+        menu_id: items[0].id,
+        date: "2098-05-01",
+        servings: 4,
+        status: "Запланировано",
+        planned_preparations: 0,
+      });
+    }
+    const otherMonth = await add("2098-06-01");
+    const completed = await add();
+    await op("cook_confirm", {
+      [isMenu ? "menu_id" : "task_id"]: completed.id,
+      version: 1,
+      date: "2098-05-01",
+      servings: 4,
+      eaten: 4,
+      fridge: 0,
+      frozen: 0,
+      usage_confirmed: true,
+      usage: [{ name: "Творог", unit: "г", amount: 0 }],
+    });
+    const preserve = () =>
+      scalar(
+        "select jsonb_build_object('events',(select jsonb_agg(to_jsonb(e)) from public.cooking_events e where family_id=$1),'prep',(select jsonb_agg(to_jsonb(p)) from public.preparations p where family_id=$1),'stock',(select jsonb_agg(to_jsonb(b)) from public.stock_batches b where family_id=$1),'money',(select jsonb_agg(to_jsonb(m)) from public.financial_movements m where family_id=$1))",
+        [family],
+      );
+    const before = await preserve();
+    await expect(
+      op(action, {
+        month: "2098-05-01",
+        items: [items[0], { id: completed.id, version: 2 }],
+      }),
+    ).rejects.toThrow("План изменён");
+    expect(
+      await scalar(`select status from public.${table} where id=$1`, [
+        items[0].id,
+      ]),
+    ).toBe("Запланировано");
+    await expect(
+      op(action, {
+        month: "2098-05-01",
+        items: [...items.slice(0, 24), { ...items[24], version: 99 }],
+      }),
+    ).rejects.toThrow("План изменён");
+    await expect(
+      op(action, { month: "2098-05-01", items: [items[0], otherMonth] }),
+    ).rejects.toThrow("План изменён");
+    const later = await add();
+    const key = crypto.randomUUID();
+    const payload = { month: "2098-05-01", items };
+    await op(action, payload, key);
+    await op(action, payload, key);
+    for (const item of items)
+      expect(
+        await scalar(`select status from public.${table} where id=$1`, [
+          item.id,
+        ]),
+      ).toBe("Отменено");
+    expect(
+      await scalar(`select status from public.${table} where id=$1`, [
+        otherMonth.id,
+      ]),
+    ).toBe("Запланировано");
+    expect(
+      await scalar(`select status from public.${table} where id=$1`, [
+        later.id,
+      ]),
+    ).toBe("Запланировано");
+    expect(
+      await scalar(`select status from public.${table} where id=$1`, [
+        completed.id,
+      ]),
+    ).toBe("Приготовлено");
+    if (linkedTask)
+      expect(
+        await scalar("select status from public.cooking_tasks where id=$1", [
+          linkedTask,
+        ]),
+      ).toBe("Запланировано");
+    if (linkedMenu)
+      expect(
+        await scalar("select status from public.menu_items where id=$1", [
+          linkedMenu.id,
+        ]),
+      ).toBe("Запланировано");
+    expect(await preserve()).toEqual(before);
+    await expect(
+      db.query("select public._planning_clear($1,$2,$3)", [
+        family,
+        action,
+        payload,
+      ]),
+    ).rejects.toThrow("permission denied");
+    await user(other);
+    await expect(op(action, payload)).rejects.toThrow("Нет права");
+    await user();
+  },
+);

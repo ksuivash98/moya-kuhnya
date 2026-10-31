@@ -751,3 +751,101 @@ test("очистить покупки: подтверждение, все стр
     await b.close();
   }
 });
+
+for (const kind of ["menu", "cooking"])
+  test(`очистка ${kind}: подтверждение, весь месяц, история и просмотр отменённых`, async ({
+    page,
+  }) => {
+    const b = await recipeBackend(page);
+    const month = day().slice(0, 7) + "-01";
+    try {
+      const { id: recipe } = await b.save("Блюдо для очистки");
+      const mutate = async (action: string, data: Record<string, unknown>) =>
+        b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+          b.family,
+          crypto.randomUUID(),
+          action,
+          data,
+        ]);
+      const add = async (date: string) => {
+        const id = crypto.randomUUID();
+        await mutate(kind === "menu" ? "menu_save" : "task_save", {
+          id,
+          recipe_id: recipe,
+          month,
+          date,
+          meal: "Ужин",
+          servings: 4,
+          planned_count: 1,
+          status: "Запланировано",
+          planned_preparations: 0,
+        });
+        return id;
+      };
+      const first = await add(day());
+      await add(kind === "menu" ? "" : month);
+      const done = await add(day());
+      await mutate("cook_confirm", {
+        [kind === "menu" ? "menu_id" : "task_id"]: done,
+        version: 1,
+        date: day(),
+        servings: 4,
+        eaten: 4,
+        fridge: 0,
+        frozen: 0,
+        usage_confirmed: true,
+        usage: [{ name: "Творог", unit: "г", amount: 0 }],
+      });
+      await page.goto("/" + kind);
+      const clear = page.getByRole("button", {
+        name: kind === "menu" ? "Очистить меню" : "Очистить план приготовления",
+        exact: true,
+      });
+      await clear.click();
+      const modal = page.getByRole("dialog");
+      await expect(modal).toContainText("2 незавершённых");
+      await modal.getByRole("button", { name: "Отмена", exact: true }).click();
+      await expect(modal).not.toBeVisible();
+      await clear.click();
+      await modal
+        .getByRole("button", { name: "Очистить список", exact: true })
+        .click();
+      await expect(modal).not.toBeVisible();
+      await expect(clear).toBeDisabled();
+      const table = kind === "menu" ? "menu_items" : "cooking_tasks";
+      expect(
+        (
+          await b.query(
+            `select id from public.${table} where status='Отменено'`,
+          )
+        ).rows,
+      ).toHaveLength(2);
+      expect(
+        (await b.query("select id from public.cooking_events")).rows,
+      ).toHaveLength(1);
+      await page.getByLabel("Показывать отменённые", { exact: true }).check();
+      await expect(
+        page.locator("article.k-item").filter({ hasText: "Отменено" }).first(),
+      ).toBeVisible();
+      await page.getByLabel("Показывать отменённые", { exact: true }).uncheck();
+      await expect(
+        page.locator("article.k-item").filter({ hasText: "Отменено" }),
+      ).toHaveCount(0);
+      await page.reload();
+      await expect(clear).toBeDisabled();
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      expect(
+        (
+          await b.query(`select status from public.${table} where id=$1`, [
+            first,
+          ])
+        ).rows[0].status,
+      ).toBe("Отменено");
+    } finally {
+      await b.close();
+    }
+  });

@@ -43,6 +43,57 @@ export default function Planning({
   notify: (s: string) => void;
 }) {
   const [params] = useSearchParams();
+  const [showCancelled, setShowCancelled] = useState(false);
+  const [clearRequest, setClearRequest] = useState<{
+    action: string;
+    key: string;
+    month: string;
+    items: { id: string; version: number }[];
+  } | null>(null);
+  const [clearError, setClearError] = useState("");
+  const unfinished = (r: Row) =>
+    ![
+      "Отменено",
+      "Приготовлено",
+      "Сделана заготовка",
+      "Приготовлено из заготовки",
+    ].includes(str(r, "status"));
+  const clearItems = rows(
+    state,
+    kind === "menu" ? "menu_items" : "cooking_tasks",
+  ).filter(
+    (r) =>
+      (kind === "menu"
+        ? str(r, "month") === month + "-01"
+        : str(r, "date").startsWith(month)) && unfinished(r),
+  );
+  async function clearPlanning() {
+    if (!clearRequest || confirmBusy) return;
+    setConfirmBusy(true);
+    setClearError("");
+    try {
+      await mutate(
+        family,
+        clearRequest.action,
+        { month: clearRequest.month, items: clearRequest.items },
+        clearRequest.key,
+      );
+      await reload();
+      setClearRequest(null);
+      notify(
+        "Выбранные незавершённые записи отменены. История приготовления сохранена.",
+      );
+    } catch (e) {
+      const message = errorText(e);
+      setClearError(
+        /Действие недоступно/i.test(message)
+          ? "Для очистки меню и плана приготовления примените миграцию 013 в Supabase."
+          : message,
+      );
+    } finally {
+      setConfirmBusy(false);
+    }
+  }
   const [mode, setMode] = useState("Месяц"),
     [anchor, setAnchor] = useState(today()),
     [dialog, setDialog] = useState<{
@@ -62,12 +113,19 @@ export default function Planning({
     [confirmBusy, setConfirmBusy] = useState(false);
   const range = monthRange(month);
   const menu = rows(state, "menu_items").filter(
-    (r) => str(r, "month") === range.from,
+    (r) =>
+      str(r, "month") === range.from &&
+      (showCancelled || r.status !== "Отменено"),
   );
-  const tasks = rows(state, "cooking_tasks").filter((r) =>
-    str(r, "date").startsWith(month),
+  const tasks = rows(state, "cooking_tasks").filter(
+    (r) =>
+      str(r, "date").startsWith(month) &&
+      (showCancelled || r.status !== "Отменено"),
   );
-  const active = rows(state, kind === "menu" ? "menu_items" : "cooking_tasks");
+  const active = rows(
+    state,
+    kind === "menu" ? "menu_items" : "cooking_tasks",
+  ).filter((r) => showCancelled || r.status !== "Отменено");
   useEffect(
     () => setAnchor(month === today().slice(0, 7) ? today() : month + "-01"),
     [month],
@@ -350,6 +408,34 @@ export default function Planning({
             Добавить блюдо
           </button>
         )}
+        {canEdit && (
+          <button
+            className="secondary danger"
+            disabled={confirmBusy || !navigator.onLine || !clearItems.length}
+            onClick={() => {
+              setClearError("");
+              setClearRequest({
+                action: kind === "menu" ? "menu_clear" : "cooking_clear",
+                key: crypto.randomUUID(),
+                month: month + "-01",
+                items: clearItems.map((r) => ({
+                  id: r.id,
+                  version: r.version,
+                })),
+              });
+            }}
+          >
+            {kind === "menu" ? "Очистить меню" : "Очистить план приготовления"}
+          </button>
+        )}
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={showCancelled}
+            onChange={(e) => setShowCancelled(e.target.checked)}
+          />
+          Показывать отменённые
+        </label>
       </div>
       {!recipes.length && (
         <p className="notice">
@@ -504,6 +590,56 @@ export default function Planning({
             </details>
           ))}
       </section>
+      {clearRequest && (
+        <Modal
+          title={
+            clearRequest.action === "menu_clear"
+              ? "Очистить меню?"
+              : "Очистить план приготовления?"
+          }
+          onClose={() => !confirmBusy && setClearRequest(null)}
+        >
+          <p className="muted">
+            Отменить {clearRequest.items.length} незавершённых записей за{" "}
+            {new Date(clearRequest.month + "T00:00:00Z").toLocaleDateString(
+              "ru-RU",
+              { month: "long", year: "numeric", timeZone: "UTC" },
+            )}{" "}
+            во всех днях выбранного месяца?
+          </p>
+          <p className="notice">
+            Приготовленные блюда, факты готовки, запасы, заготовки, покупки и
+            другие месяцы сохранятся.{" "}
+            {clearRequest.action === "menu_clear"
+              ? "Связанные задачи плана приготовления останутся — при необходимости очистите план отдельно."
+              : "Меню останется без изменений — при необходимости очистите его отдельно."}{" "}
+            Отменённые записи доступны через «Показывать отменённые».
+          </p>
+          {clearError && (
+            <p className="error" role="alert">
+              {clearError}
+            </p>
+          )}
+          <div className="shopping-clear-actions">
+            <button
+              type="button"
+              className="secondary"
+              disabled={confirmBusy}
+              onClick={() => setClearRequest(null)}
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              className="secondary danger"
+              disabled={confirmBusy || !navigator.onLine}
+              onClick={() => void clearPlanning()}
+            >
+              {confirmBusy ? "Очищаем…" : "Очистить список"}
+            </button>
+          </div>
+        </Modal>
+      )}
       {dialog && (
         <Fields
           offlineAllowed={
