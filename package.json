@@ -11,14 +11,19 @@
     "test:ui": "playwright test",
     "build:pages": "npm run build && node scripts/prepare-pages.mjs",
     "test:pages": "playwright test --config=playwright.pages.config.ts",
-    "build:edge-editor": "node scripts/build-recipe-import-editor.mjs"
+    "build:edge-editor": "node scripts/build-recipe-import-editor.mjs",
+    "predev": "node scripts/prepare-ocr.mjs",
+    "prebuild": "node scripts/prepare-ocr.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.99.2",
+    "@tesseract.js-data/eng": "1.0.0",
+    "@tesseract.js-data/rus": "1.0.0",
     "lucide-react": "0.468.0",
     "react": "19.0.0",
     "react-dom": "19.0.0",
-    "react-router-dom": "7.18.5"
+    "react-router-dom": "7.18.5",
+    "tesseract.js": "7.0.0"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.14",

@@ -32,6 +32,7 @@ export default defineConfig({
       workbox: {
         navigateFallback: "index.html",
         navigateFallbackDenylist: [/\/auth(?:\/|$)/],
+        globIgnores: ["**/ocr/**"],
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
         runtimeCaching: [],
       },

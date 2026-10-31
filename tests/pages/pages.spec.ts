@@ -53,3 +53,16 @@ test("Pages: ресурсы, навигация, прямые ссылки и PW
   expect(scope).toBe("/moya-kuhnya/");
   expect(errors).toEqual([]);
 });
+
+test("Pages: OCR-ресурсы доступны в подпапке сайта", async ({ request }) => {
+  const worker = await request.get("/moya-kuhnya/ocr/worker.min.js");
+  expect(worker.ok()).toBe(true);
+  expect(await worker.text()).not.toContain("<!doctype html>");
+  for (const lang of ["rus", "eng"]) {
+    const data = await request.get(`/moya-kuhnya/ocr/${lang}.traineddata.gz`);
+    expect(data.ok()).toBe(true);
+    expect((await data.body()).subarray(0, 2)).toEqual(
+      Buffer.from([0x1f, 0x8b]),
+    );
+  }
+});

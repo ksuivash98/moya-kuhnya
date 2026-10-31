@@ -1,5 +1,5 @@
 import { validateExtraction as validateHistory } from "../../supabase/functions/_shared/recipe-import";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Modal from "../components/Modal";
 import { client, errorText } from "../supabase";
 import { PhotoField } from "./Photos";
@@ -10,6 +10,7 @@ import {
   type ExtractedRecipe,
 } from "./import";
 import { writeDraft, recentImportDrafts, type Draft } from "./drafts";
+import { parseRecipeText, recognizePhotoLocally } from "./local-import";
 type History = {
   id: string;
   source_kind: string;
@@ -29,6 +30,11 @@ export default function RecipeImport({
   onClose: () => void;
   onReview: (id: string) => void;
 }) {
+  const ocrController = useRef<AbortController | null>(null);
+  useEffect(() => () => ocrController.current?.abort(), []);
+  const [photoText, setPhotoText] = useState(false);
+  const [engine, setEngine] = useState<"local" | "remote">("local");
+  const [progress, setProgress] = useState(0);
   const [text, setText] = useState(""),
     [photo, setPhoto] = useState<Blob | null>(null),
     [photoBusy, setPhotoBusy] = useState(0),
@@ -52,27 +58,28 @@ export default function RecipeImport({
         if (active) setDrafts(rows);
       })
       .catch(() => {});
-    void client()
-      .from("recipe_import_requests")
-      .select("id,source_kind,result,created_at")
-      .eq("family_id", familyId)
-      .eq("user_id", userId)
-      .eq("status", "ready")
-      .order("created_at", { ascending: false })
-      .limit(5)
-      .then((r) => {
-        if (active) {
-          if (r.error)
-            setHistoryNote(
-              "История пока недоступна. Для первого подключения примените миграцию 009.",
-            );
-          else setHistory(r.data ?? []);
-        }
-      });
+    if (engine === "remote")
+      void client()
+        .from("recipe_import_requests")
+        .select("id,source_kind,result,created_at")
+        .eq("family_id", familyId)
+        .eq("user_id", userId)
+        .eq("status", "ready")
+        .order("created_at", { ascending: false })
+        .limit(5)
+        .then((r) => {
+          if (active) {
+            if (r.error)
+              setHistoryNote(
+                "История пока недоступна. Для первого подключения примените миграцию 009.",
+              );
+            else setHistory(r.data ?? []);
+          }
+        });
     return () => {
       active = false;
     };
-  }, [userId, familyId]);
+  }, [userId, familyId, engine]);
   useEffect(() => {
     const guard = (e: Event) => {
       if (busy || photoBusy) {
@@ -115,6 +122,7 @@ export default function RecipeImport({
       setBusy(false);
     }
   }
+  const local = engine === "local";
   const preview = result?.is_recipe ? importDraft(result) : null;
   return (
     <Modal
@@ -128,6 +136,33 @@ export default function RecipeImport({
         проверьте результат и сохраните рецепт. Автоматической записи в книгу
         нет.
       </p>
+      {!result && (
+        <label className="form-stack">
+          Способ распознавания
+          <select
+            value={engine}
+            disabled={busy || photoBusy > 0}
+            onChange={(e) => {
+              setEngine(e.target.value as "local" | "remote");
+              setPhotoText(false);
+              setConsent(false);
+              setText("");
+              reset();
+            }}
+          >
+            <option value="local">На устройстве — бесплатно</option>
+            <option value="remote">OpenAI — по тарифу владельца</option>
+          </select>
+        </label>
+      )}
+      {!result && local && (
+        <p className="notice">
+          Текст и фото обрабатываются в браузере без платных запросов. Для фото
+          при первом запуске загружаются языковые файлы с этого сайта. Нужна
+          страница с написанным рецептом: состав готового блюда по фотографии не
+          определяется.
+        </p>
+      )}
       {!result && drafts.length > 0 && (
         <details className="import-history">
           <summary>Мои черновики после распознавания</summary>
@@ -154,19 +189,33 @@ export default function RecipeImport({
           className="form-stack"
           onSubmit={async (e) => {
             e.preventDefault();
-            if (busy || photoBusy || !consent) return;
+            if (busy || photoBusy || (!local && !consent)) return;
             setError("");
             setBusy(true);
             try {
-              setResult(
-                await recognizeRecipe(
-                  requestId,
-                  familyId,
-                  mode === "text"
-                    ? { kind: "text", text }
-                    : { kind: "photo", image: await imageData(photo!) },
-                ),
-              );
+              if (local) {
+                if (mode === "photo" && !photoText) {
+                  setProgress(0);
+                  ocrController.current = new AbortController();
+                  setText(
+                    await recognizePhotoLocally(
+                      photo!,
+                      setProgress,
+                      ocrController.current.signal,
+                    ),
+                  );
+                  setPhotoText(true);
+                } else setResult(parseRecipeText(text));
+              } else
+                setResult(
+                  await recognizeRecipe(
+                    requestId,
+                    familyId,
+                    mode === "text"
+                      ? { kind: "text", text }
+                      : { kind: "photo", image: await imageData(photo!) },
+                  ),
+                );
             } catch (err) {
               setError(errorText(err));
             } finally {
@@ -174,7 +223,7 @@ export default function RecipeImport({
             }
           }}
         >
-          {mode === "text" ? (
+          {mode === "text" || (local && photoText) ? (
             <label>
               Текст рецепта
               <textarea
@@ -201,7 +250,9 @@ export default function RecipeImport({
                 disabled={busy}
                 onBusy={(n) => setPhotoBusy((v) => Math.max(0, v + n))}
                 onChange={(blob) => {
+                  setPhotoText(false);
                   setPhoto(blob);
+                  setText("");
                   reset();
                 }}
               />
@@ -211,23 +262,45 @@ export default function RecipeImport({
               </small>
             </>
           )}
-          <div className="notice">
-            <p>
-              Выбранный {mode === "photo" ? "снимок" : "текст"} будет отправлен
-              внешнему сервису OpenAI. Не добавляйте личные данные. Запрос может
-              быть платным по тарифу владельца; до 5 распознаваний в сутки,
-              включая неудачные.
+          {!local && (
+            <div className="notice">
+              <p>
+                Выбранный {mode === "photo" ? "снимок" : "текст"} будет
+                отправлен внешнему сервису OpenAI. Не добавляйте личные данные.
+                Запрос может быть платным по тарифу владельца; до 5
+                распознаваний в сутки, включая неудачные.
+              </p>
+              <label className="check-line">
+                <input
+                  type="checkbox"
+                  checked={consent}
+                  disabled={busy}
+                  onChange={(e) => setConsent(e.target.checked)}
+                />
+                Разрешаю отправить этот источник в OpenAI для распознавания
+              </label>
+            </div>
+          )}
+          {local && mode === "photo" && text && (
+            <p className="muted">
+              Проверьте распознанный текст и исправьте ошибки, затем нажмите
+              «Распознать рецепт».
             </p>
-            <label className="check-line">
-              <input
-                type="checkbox"
-                checked={consent}
-                disabled={busy}
-                onChange={(e) => setConsent(e.target.checked)}
-              />
-              Разрешаю отправить этот источник в OpenAI для распознавания
-            </label>
-          </div>
+          )}
+          {busy && local && mode === "photo" && (
+            <p role="status">
+              Загрузка распознавания и обработка фото… {progress}%
+            </p>
+          )}
+          {busy && local && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => ocrController.current?.abort()}
+            >
+              Остановить распознавание
+            </button>
+          )}
           <div className="dialog-actions">
             <button
               type="button"
@@ -242,8 +315,8 @@ export default function RecipeImport({
               disabled={
                 busy ||
                 photoBusy > 0 ||
-                !consent ||
-                (mode === "text" ? !text.trim() : !photo)
+                (!local && !consent) ||
+                (mode === "text" ? !text.trim() : !photo && !text.trim())
               }
             >
               {busy ? "Распознаём…" : "Распознать рецепт"}
@@ -299,8 +372,9 @@ export default function RecipeImport({
                 </div>
               )}
               <p>
-                ИИ может ошибаться. Далее откроется форма, в которой можно
-                исправить все поля, удалить или добавить ингредиенты и шаги.
+                Распознавание может ошибаться. Далее откроется форма, в которой
+                можно исправить все поля, удалить или добавить ингредиенты и
+                шаги.
               </p>
               <button
                 className="primary"
@@ -326,7 +400,7 @@ export default function RecipeImport({
           {error}
         </p>
       )}
-      {!result && (
+      {!result && !local && (
         <details className="import-history">
           <summary>Мои последние распознавания</summary>
           <p className="muted">

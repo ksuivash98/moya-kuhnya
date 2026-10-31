@@ -491,7 +491,7 @@ export default function RecipesPage({
               },
               {
                 name: "По фото или скриншоту",
-                hint: "Распознавание с помощью ИИ",
+                hint: "Текст с фото — бесплатно на устройстве",
                 icon: Camera,
               },
               {

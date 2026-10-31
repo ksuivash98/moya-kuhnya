@@ -437,6 +437,7 @@ async function openImport(
     .getByRole("button", { name: "Добавить рецепт", exact: true })
     .click();
   await page.getByRole("button", { name: kind, exact: false }).click();
+  await page.getByLabel("Способ распознавания").selectOption("remote");
 }
 test("импорт текста: согласие → предпросмотр → правка → черновик после перезагрузки → явное сохранение", async ({
   page,
