@@ -1,5 +1,5 @@
 import { client, check } from "../supabase";
-import { useSearchParams } from "react-router-dom";
+import { NavLink, useSearchParams } from "react-router-dom";
 import { useState, useEffect, useCallback } from "react";
 import { Plus } from "lucide-react";
 import Fields, { type Field } from "./Fields";
@@ -47,7 +47,10 @@ export default function Inventory({
     .map((p) => ({ value: p.id, label: str(p, "name") }));
   const placeField: Field = {
     key: "place_id",
-    label: "Место хранения",
+    label: prep ? "Место хранения" : "Где хранится",
+    hint: prep
+      ? undefined
+      : "Выберите холодильник, морозилку или шкаф. Новое место можно создать кнопкой «Добавить место хранения».",
     options: [
       { value: "", label: "Не указано" },
       ...places.map((p) => ({ value: p.id, label: str(p, "name") })),
@@ -61,34 +64,50 @@ export default function Inventory({
   }, [dialog?.action, dialog?.row?.id]);
   const fields: Field[] =
     action === "place_save"
-      ? [{ key: "name", label: "Название места", required: true }]
+      ? [
+          {
+            key: "name",
+            label: "Название места",
+            required: true,
+            hint: "Например: холодильник, морозилка или кухонный шкаф.",
+          },
+        ]
       : action === "product_save"
         ? [
-            { key: "name", label: "Название продукта", required: true },
+            {
+              key: "name",
+              label: "Название продукта",
+              required: true,
+              hint: "Только название: например, молоко или рис. Количество и срок годности добавляются отдельно в запасе.",
+            },
             {
               key: "category",
-              label: "Категория",
+              label: "Категория продукта",
+              hint: "Группа для покупок и учёта: например, молочные продукты, овощи или крупы.",
               options: options(productCategories),
             },
             {
               key: "minimum",
-              label: "Минимальный остаток в базовой единице",
+              label: "Желаемый минимальный запас",
+              hint: "Необязательно. Сколько хотите держать дома в выбранной единице учёта. Например, 500 г. Сейчас это справочное значение: на расчёт покупок не влияет. 0 — минимум не задан.",
               type: "number",
               min: 0,
             },
             {
               key: "unit",
-              label: "Базовая единица",
+              label: "Единица учёта продукта",
+              hint: "В чём считать запас: г для веса, мл для жидкости, шт. для отдельных предметов. Кг и л пересчитываются в г и мл. Упаковки в граммы автоматически не переводятся.",
               options: options(
                 stockUnits.filter((u) => !["кг", "л"].includes(u)),
               ),
             },
             {
               key: "archived",
-              label: "Состояние",
+              label: "Использование продукта",
+              hint: "Архив скрывает продукт из выбора, сохраняя историю. Убрать в архив можно только при нулевом остатке.",
               options: [
-                { value: "false", label: "Активен" },
-                { value: "true", label: "Архив (только при нулевых остатках)" },
+                { value: "false", label: "Используется" },
+                { value: "true", label: "В архиве (когда запас закончился)" },
               ],
             },
           ]
@@ -198,40 +217,66 @@ export default function Inventory({
             : [
                 {
                   key: "product_id",
-                  label: "Продукт",
+                  label: "Какой продукт",
+                  hint: "Выберите название из списка. Если нужного нет, закройте окно и нажмите «Создать продукт».",
                   options: productOptions,
                   required: true,
                 },
                 {
                   key: "quantity",
-                  label: "Фактическое количество",
+                  label: dialog?.row
+                    ? "Сколько осталось"
+                    : "Сколько есть в этой упаковке",
+                  hint: dialog?.row
+                    ? "Введите новый остаток, а не расход. Например: было 800 г, использовали 300 г — укажите 500 г. Чтобы убрать запас, введите 0."
+                    : "Введите количество для одного срока годности и места хранения. Например: 0,5 кг, 500 г или 2 шт. Упаковки с разными сроками добавляйте отдельно.",
                   type: "number",
                   min: 0,
                   required: true,
                 },
                 {
                   key: "unit",
-                  label: "Единица (количество вводите именно в ней)",
+                  label: "В чём указано количество",
+                  hint: "Выберите единицу к числу выше: 0,5 + кг = 500 г. Для уже сохранённого запаса нельзя менять продукт или тип единицы: например, граммы на штуки.",
                   options: options(stockUnits),
                 },
                 {
                   key: "purchased_on",
-                  label: "Дата покупки",
+                  label: "Когда купили",
+                  hint: "Дата покупки этой упаковки или порции продукта.",
                   type: "date",
                   required: true,
                 },
-                { key: "expires_on", label: "Срок годности", type: "date" },
+                {
+                  key: "expires_on",
+                  label: "Годен до",
+                  type: "date",
+                  hint: "Укажите дату с упаковки. Если срок неизвестен, поле можно оставить пустым.",
+                },
                 placeField,
                 {
                   key: "reason",
-                  label: "Причина корректировки",
-                  options: options([
-                    "Ручное добавление",
-                    "Ручная корректировка",
-                    "Списание",
-                    "Списание просроченного",
-                    "Удаление партии",
-                  ]),
+                  label: "Почему меняете запас",
+                  hint: "Причина попадёт в историю. Количество выше всегда означает, сколько осталось после изменения.",
+                  options: [
+                    {
+                      value: "Ручное добавление",
+                      label: "Добавляю имеющийся запас",
+                    },
+                    {
+                      value: "Ручная корректировка",
+                      label: "Уточняю оставшееся количество",
+                    },
+                    { value: "Списание", label: "Использовано или испорчено" },
+                    {
+                      value: "Списание просроченного",
+                      label: "Истёк срок годности",
+                    },
+                    {
+                      value: "Удаление партии",
+                      label: "Убираю запас — остаток должен быть 0",
+                    },
+                  ],
                 },
                 { key: "notes", label: "Примечания", type: "textarea" },
               ];
@@ -272,6 +317,31 @@ export default function Inventory({
   const perPage = 20;
   return (
     <>
+      {!prep && (
+        <section className="panel stock-help" aria-label="Как вести запасы">
+          <h2>Что сюда записывать</h2>
+          <p>
+            <strong>Создать продукт</strong> — добавить название и настройки,
+            например «Молоко». Само по себе это не добавляет молоко в запасы.
+          </p>
+          <p>
+            <strong>Добавить запас</strong> — указать, сколько продукта уже есть
+            дома, где он лежит и до какой даты годен. Если название уже есть в
+            списке, создавать его повторно не нужно.
+          </p>
+          <p>
+            Упаковки с разными сроками или местами хранения добавляйте отдельно.
+            Например: одна пачка творога в холодильнике и другая в морозилке —
+            два запаса.
+          </p>
+          <p>
+            Покупку с ценой оформляйте в{" "}
+            <NavLink to="/shopping">«Покупках»</NavLink>: там одновременно
+            обновятся запасы и расходы. Ручное добавление здесь не записывает
+            расход денег.
+          </p>
+        </section>
+      )}
       <div className="k-toolbar">
         <input
           aria-label="Поиск запасов"
@@ -307,21 +377,21 @@ export default function Inventory({
               disabled={!prep && !productOptions.length}
             >
               <Plus size={17} />
-              {prep ? "Добавить заготовку" : "Добавить партию"}
+              {prep ? "Добавить заготовку" : "Добавить запас"}
             </button>
             {!prep && (
               <button
                 className="secondary"
                 onClick={() => setDialog({ action: "product_save" })}
               >
-                Новый продукт
+                Создать продукт
               </button>
             )}
             <button
               className="secondary"
               onClick={() => setDialog({ action: "place_save" })}
             >
-              Место хранения
+              {prep ? "Место хранения" : "Добавить место хранения"}
             </button>
           </>
         )}
@@ -330,7 +400,9 @@ export default function Inventory({
         <div className="panel k-empty">
           {prep
             ? "Заготовок пока нет. Их можно добавить вручную или получить при подтверждении готовки."
-            : "Партий пока нет. Сначала добавьте продукт, затем его фактическое количество."}
+            : query || filter
+              ? "По этим условиям запасов нет. Измените поиск или место хранения."
+              : "Запасов пока нет. Нажмите «Создать продукт», если названия ещё нет в списке, затем «Добавить запас» и укажите количество."}
         </div>
       )}
       <div className="k-list">
@@ -348,6 +420,7 @@ export default function Inventory({
             </span>
             <h3>{prep ? str(r, "title") : str(product(r), "name")}</h3>
             <strong>
+              {!prep && "В наличии: "}
               {fmt(num(r, "quantity"))} {str(r, "unit")}
             </strong>
             <p>
@@ -355,7 +428,8 @@ export default function Inventory({
                 places.find((p) => p.id === r.place_id),
                 "name",
               ) || "Место не указано"}{" "}
-              · до {str(r, "expires_on") || "не указано"}
+              · {prep ? "до" : "Годен до:"}{" "}
+              {str(r, "expires_on") || "не указано"}
             </p>
             {r.expires_on && str(r, "expires_on") < today() && (
               <p className="k-danger">Срок годности истёк</p>
@@ -370,7 +444,7 @@ export default function Inventory({
                     })
                   }
                 >
-                  Изменить / скорректировать
+                  {prep ? "Изменить / скорректировать" : "Изменить запас"}
                 </button>
                 {prep ? (
                   <button
@@ -384,7 +458,7 @@ export default function Inventory({
                       setDialog({ action: "product_save", row: product(r) })
                     }
                   >
-                    Карточка продукта
+                    Настройки продукта
                   </button>
                 )}
               </div>
@@ -412,14 +486,14 @@ export default function Inventory({
         </div>
       )}
       <section className="panel k-section">
-        <h2>История операций</h2>
+        <h2>{prep ? "История операций" : "Как менялись запасы"}</h2>
         <div className="k-table-wrap">
           <table>
             <thead>
               <tr>
                 <th>Дата</th>
-                <th>Продукт / заготовка</th>
-                <th>Изменение</th>
+                <th>{prep ? "Продукт / заготовка" : "Продукт"}</th>
+                <th>{prep ? "Изменение" : "Добавлено / убыло"}</th>
                 <th>Причина</th>
               </tr>
             </thead>
@@ -473,22 +547,36 @@ export default function Inventory({
           </table>
         </div>
         <p className="muted">
-          Показаны последние 100 движений. Нулевая корректировка убирает партию
-          из активного списка, история сохраняется.
+          {prep
+            ? "Показаны последние 100 движений. Нулевая корректировка убирает партию из активного списка, история сохраняется."
+            : "Здесь последние 100 изменений: положительное число — добавили, отрицательное — использовали или списали. Остаток 0 убирает запас из списка, но не удаляет историю."}
         </p>
       </section>
       {dialog && (
         <Fields
           title={
             action === "product_save"
-              ? "Карточка продукта"
+              ? dialog.row
+                ? "Настройки продукта"
+                : "Создать продукт"
               : action === "place_save"
                 ? "Место хранения"
                 : action === "prep_use"
                   ? "Операция с заготовкой"
                   : prep
                     ? "Заготовка"
-                    : "Партия продукта"
+                    : dialog.row
+                      ? "Изменить запас"
+                      : "Добавить запас"
+          }
+          description={
+            !prep
+              ? action === "product_save"
+                ? "Здесь задаются только название и настройки продукта. Количество, которое есть дома, внесите через «Добавить запас»."
+                : action === "place_save"
+                  ? "Это место, где лежат продукты. Например, можно отдельно указать полку холодильника или шкаф."
+                  : "Один запас — продукт с одним сроком годности в одном месте. Внесите фактическое количество, которое есть дома; стоимость здесь не учитывается."
+              : undefined
           }
           fields={fields}
           externalBusy={photoBusy > 0}
@@ -518,7 +606,11 @@ export default function Inventory({
             prepared_on: today(),
             date: today(),
             product_id: productOptions[0]?.value,
-            reason: "Использование",
+            reason: prep
+              ? "Использование"
+              : dialog.row
+                ? "Ручная корректировка"
+                : "Ручное добавление",
             archived: "false",
             ...dialog.row,
           }}
@@ -547,7 +639,17 @@ export default function Inventory({
               throw e;
             }
             await reload();
-            notify("Операция сохранена. История и остатки обновлены.");
+            notify(
+              prep
+                ? "Операция сохранена. История и остатки обновлены."
+                : action === "product_save"
+                  ? dialog.row
+                    ? "Настройки продукта сохранены."
+                    : "Продукт создан. Теперь нажмите «Добавить запас», чтобы указать количество дома."
+                  : action === "place_save"
+                    ? "Место хранения добавлено."
+                    : "Остаток сохранён. Изменение записано в историю.",
+            );
           }}
         />
       )}

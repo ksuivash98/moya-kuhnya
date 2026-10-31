@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useRef, useState, useId, type FormEvent, type ReactNode } from "react";
 import Modal from "../components/Modal";
 import { errorText } from "../supabase";
 export type Field = {
@@ -21,6 +21,7 @@ export default function Fields({
   offlineAllowed = false,
   extra,
   externalBusy = false,
+  description,
 }: {
   title: string;
   fields: Field[];
@@ -30,7 +31,9 @@ export default function Fields({
   offlineAllowed?: boolean;
   extra?: ReactNode;
   externalBusy?: boolean;
+  description?: string;
 }) {
+  const hintId = useId();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const key = useRef(crypto.randomUUID());
@@ -53,6 +56,7 @@ export default function Fields({
   }
   return (
     <Modal title={title} onClose={() => !busy && !externalBusy && onClose()}>
+      {description && <p className="muted">{description}</p>}
       <form onSubmit={submit} className="form-stack">
         <fieldset disabled={busy} className="k-fields">
           {extra}
@@ -62,12 +66,16 @@ export default function Fields({
               {f.type === "textarea" ? (
                 <textarea
                   name={f.key}
+                  aria-label={f.label}
+                  aria-describedby={f.hint ? `${hintId}-${f.key}` : undefined}
                   defaultValue={String(initialValue.current[f.key] ?? "")}
                   maxLength={20000}
                 />
               ) : f.options ? (
                 <select
                   name={f.key}
+                  aria-label={f.label}
+                  aria-describedby={f.hint ? `${hintId}-${f.key}` : undefined}
                   defaultValue={String(initialValue.current[f.key] ?? "")}
                   required={f.required}
                 >
@@ -80,6 +88,8 @@ export default function Fields({
               ) : (
                 <input
                   name={f.key}
+                  aria-label={f.label}
+                  aria-describedby={f.hint ? `${hintId}-${f.key}` : undefined}
                   type={f.type ?? "text"}
                   defaultValue={String(initialValue.current[f.key] ?? "")}
                   required={f.required}
@@ -89,7 +99,7 @@ export default function Fields({
                   maxLength={2000}
                 />
               )}{" "}
-              {f.hint && <small>{f.hint}</small>}
+              {f.hint && <small id={`${hintId}-${f.key}`}>{f.hint}</small>}
             </label>
           ))}
         </fieldset>

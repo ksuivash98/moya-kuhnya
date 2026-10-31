@@ -336,3 +336,21 @@ details .checkbox-label {
     grid-template-columns: 1fr;
   }
 }
+
+.stock-help {
+  margin-bottom: 20px;
+}
+.stock-help p {
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--muted);
+}
+.stock-help strong {
+  color: var(--text);
+}
+.stock-help a {
+  color: var(--green);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

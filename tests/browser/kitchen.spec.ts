@@ -447,6 +447,7 @@ test("категории покупок: автоматическая подск
       .getByRole("dialog")
       .getByRole("button", { name: "Сохранить", exact: true })
       .click();
+    await expect(page.getByRole("dialog")).not.toBeVisible();
     await page.goto("/shopping");
     const generate = page.getByRole("button", {
       name: "Рассчитать недостающие продукты",
@@ -543,6 +544,97 @@ test("главная при первом открытии: показатели 
           });
       }
     }
+  } finally {
+    await b.close();
+  }
+});
+
+test("мои продукты: понятный путь от названия к запасу и изменение оставшегося количества", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    await page.goto("/products");
+    await expect(
+      page.getByRole("region", { name: "Как вести запасы", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Добавить запас", exact: true }),
+    ).toBeDisabled();
+    await page
+      .getByRole("button", { name: "Создать продукт", exact: true })
+      .click();
+    let modal = page.getByRole("dialog");
+    await expect(modal).toContainText(
+      "Количество, которое есть дома, внесите через «Добавить запас»",
+    );
+    await modal.getByLabel("Название продукта", { exact: true }).fill("Рис");
+    await modal
+      .getByLabel("Категория продукта", { exact: true })
+      .selectOption("Крупы");
+    await modal
+      .getByLabel("Единица учёта продукта", { exact: true })
+      .selectOption("г");
+    await expect(
+      modal.getByLabel("Желаемый минимальный запас", { exact: true }),
+    ).toHaveAccessibleDescription(/на расчёт покупок не влияет/);
+    await modal.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(modal).not.toBeVisible();
+    expect(
+      (await b.query("select id from public.stock_batches")).rows,
+    ).toHaveLength(0);
+    await page
+      .getByRole("button", { name: "Добавить запас", exact: true })
+      .click();
+    modal = page.getByRole("dialog");
+    await modal
+      .getByLabel("Сколько есть в этой упаковке", { exact: true })
+      .fill("0.5");
+    await modal
+      .getByLabel("В чём указано количество", { exact: true })
+      .selectOption("кг");
+    await modal.getByLabel("Годен до", { exact: true }).fill("2099-01-01");
+    await modal
+      .getByLabel("Где хранится", { exact: true })
+      .selectOption({ label: "Кухонный шкаф" });
+    await modal.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(modal).not.toBeVisible();
+    const card = page
+      .locator("article.k-item")
+      .filter({ has: page.getByRole("heading", { name: "Рис", exact: true }) });
+    await expect(card).toContainText("В наличии: 500 г");
+    await card
+      .getByRole("button", { name: "Изменить запас", exact: true })
+      .click();
+    modal = page.getByRole("dialog");
+    await expect(
+      modal.getByLabel("Сколько осталось", { exact: true }),
+    ).toHaveAccessibleDescription(/новый остаток, а не расход/);
+    await modal.getByLabel("Сколько осталось", { exact: true }).fill("200");
+    expect(await modal.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(
+      true,
+    );
+    await modal.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(card).toContainText("В наличии: 200 г");
+    expect(
+      Number(
+        (
+          await b.query<{ quantity: number }>(
+            "select quantity from public.stock_batches",
+          )
+        ).rows[0].quantity,
+      ),
+    ).toBe(200);
+    expect((await b.query("select id from public.expenses")).rows).toHaveLength(
+      0,
+    );
+    await page.reload();
+    await expect(card).toContainText("В наличии: 200 г");
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
   } finally {
     await b.close();
   }
