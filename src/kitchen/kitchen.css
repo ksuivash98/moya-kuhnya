@@ -289,3 +289,50 @@ details .checkbox-label {
     margin: 14px 20px;
   }
 }
+
+/* Блок главной страницы должен быть оформлен при первом открытии приложения. */
+.family-dashboard .k-metrics {
+  margin-top: 18px;
+  margin-bottom: 0;
+}
+.family-dashboard .k-item {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.family-dashboard .k-item > span,
+.family-dashboard .k-item > small {
+  color: var(--muted);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.family-dashboard .k-item > span {
+  font-size: 13px;
+}
+.family-dashboard .k-item > strong {
+  margin: 0;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.family-dashboard .k-item > small {
+  display: block;
+  font-size: 12px;
+}
+@media (max-width: 720px) {
+  .family-dashboard .k-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .family-dashboard .k-item {
+    padding: 15px;
+  }
+  .family-dashboard-budget {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 360px) {
+  .family-dashboard .k-metrics {
+    grid-template-columns: 1fr;
+  }
+}

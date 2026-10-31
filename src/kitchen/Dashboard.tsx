@@ -1,3 +1,4 @@
+import "./kitchen.css";
 import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { loadKitchen } from "./api";
@@ -45,7 +46,10 @@ export default function Dashboard({
       (m) => m.date === today() && m.status !== "Отменено",
     );
   return (
-    <section className="panel k-section">
+    <section
+      className="panel k-section family-dashboard"
+      aria-label="Сегодня в семье"
+    >
       <h2>Сегодня в семье</h2>
       <div className="k-metrics">
         <NavLink to="/menu" className="k-item">
@@ -75,7 +79,7 @@ export default function Dashboard({
           </strong>
         </NavLink>
         {state.summary && (
-          <NavLink to="/budget" className="k-item">
+          <NavLink to="/budget" className="k-item family-dashboard-budget">
             <span>Расходы месяца</span>
             <strong>{rub(Number(state.summary.spent))}</strong>
             <small>Осталось: {rub(Number(state.summary.remaining))}</small>

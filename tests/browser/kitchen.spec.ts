@@ -453,11 +453,9 @@ test("категории покупок: автоматическая подск
       exact: true,
     });
     await generate.click();
-    const item = page
-      .locator("article.k-item")
-      .filter({
-        has: page.getByRole("heading", { name: "творог", exact: true }),
-      });
+    const item = page.locator("article.k-item").filter({
+      has: page.getByRole("heading", { name: "творог", exact: true }),
+    });
     await expect(item.locator(".pill")).toHaveText("Молочные продукты");
     await item
       .getByRole("button", { name: "Изменить / удалить", exact: true })
@@ -479,6 +477,72 @@ test("категории покупок: автоматическая подск
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
+  } finally {
+    await b.close();
+  }
+});
+
+test("главная при первом открытии: показатели семьи не слипаются на телефоне и компьютере", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    // Не посещаем ленивый KitchenPage: стили должны загрузиться уже на главной.
+    await page.goto("/");
+    const panel = page.getByRole("region", {
+      name: "Сегодня в семье",
+      exact: true,
+    });
+    await expect(panel).toBeVisible();
+    const cards = panel.getByRole("link");
+    await expect(cards).toHaveCount(5);
+    for (const theme of ["light", "dark"]) {
+      await page.evaluate((theme) => {
+        document.documentElement.dataset.theme = theme;
+      }, theme);
+      for (const width of [320, 390, 768, 1366]) {
+        await page.setViewportSize({ width, height: 900 });
+        for (const card of await cards.all()) {
+          const label = await card.locator("span").boundingBox();
+          const value = await card.locator("strong").boundingBox();
+          expect(label).not.toBeNull();
+          expect(value).not.toBeNull();
+          expect(value!.y).toBeGreaterThanOrEqual(label!.y + label!.height);
+          const size = await card.evaluate((e) => ({
+            width: e.clientWidth,
+            scroll: e.scrollWidth,
+          }));
+          expect(size.scroll).toBeLessThanOrEqual(size.width);
+        }
+        const rects = await cards.evaluateAll((nodes) =>
+          nodes.map((n) => {
+            const r = n.getBoundingClientRect();
+            return { x: r.x, y: r.y, right: r.right, bottom: r.bottom };
+          }),
+        );
+        for (let i = 0; i < rects.length; i++)
+          for (let j = i + 1; j < rects.length; j++) {
+            const a = rects[i],
+              b = rects[j];
+            expect(
+              a.right <= b.x ||
+                b.right <= a.x ||
+                a.bottom <= b.y ||
+                b.bottom <= a.y,
+            ).toBe(true);
+          }
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth <= innerWidth,
+          ),
+        ).toBe(true);
+        await expect(cards.last()).toHaveAttribute("href", /\/budget$/);
+        if (width === 390 && theme === "dark")
+          await panel.screenshot({
+            path: test.info().outputPath("family-mobile-dark.png"),
+          });
+      }
+    }
   } finally {
     await b.close();
   }
