@@ -337,7 +337,11 @@ export default function Inventory({
         {visible.slice(page * perPage, (page + 1) * perPage).map((r) => (
           <article className="k-item" key={r.id}>
             {prep && (
-              <Photo path={str(r, "photo_path")} alt={str(r, "title")} />
+              <Photo
+                path={str(r, "photo_path")}
+                alt={str(r, "title")}
+                zoomable
+              />
             )}
             <span className="pill quiet">
               {prep ? str(r, "category") : str(product(r), "category")}

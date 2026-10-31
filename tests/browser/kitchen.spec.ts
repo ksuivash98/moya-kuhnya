@@ -216,22 +216,114 @@ test("ручная заготовка сохраняет отдельную пр
     await page
       .getByRole("button", { name: "Добавить заготовку", exact: true })
       .click();
-    const modal = page.getByRole("dialog");
+    const modal = page.getByRole("dialog", { name: "Заготовка", exact: true });
     await modal
       .getByLabel("Название заготовки", { exact: true })
       .fill("Фотозаготовка");
     await modal.getByLabel("Количество", { exact: true }).fill("2");
+    const png = await page.evaluate(() => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 600;
+      canvas.height = 1200;
+      const ctx = canvas.getContext("2d")!;
+      ctx.fillStyle = "#eac";
+      ctx.fillRect(0, 0, 600, 1200);
+      ctx.fillStyle = "#285";
+      ctx.fillRect(0, 0, 600, 50);
+      ctx.fillRect(0, 1150, 600, 50);
+      return canvas.toDataURL("image/png").split(",")[1];
+    });
     await modal
       .getByLabel("Фотография заготовки", { exact: true })
-      .setInputFiles("public/icon-192.png");
+      .setInputFiles({
+        name: "preparation.png",
+        mimeType: "image/png",
+        buffer: Buffer.from(png, "base64"),
+      });
     await expect(modal.getByText("Обрабатываем…", { exact: true })).toHaveCount(
       0,
     );
+    await expect(
+      modal.getByRole("img", { name: "Фотография заготовки", exact: true }),
+    ).toHaveCSS("object-fit", "contain");
+    await modal
+      .getByRole("button", {
+        name: "Открыть фото: Фотография заготовки",
+        exact: true,
+      })
+      .click();
+    const preview = page.getByRole("dialog", {
+      name: "Фотография заготовки",
+      exact: true,
+    });
+    await expect(preview).toBeVisible();
+    await expect(preview.locator("img")).toHaveCSS("object-fit", "contain");
+    await preview.getByRole("button", { name: "Закрыть", exact: true }).click();
+    await expect(preview).not.toBeVisible();
+    await expect(modal).toBeVisible();
+    expect(
+      (await b.query("select id from public.preparations")).rows,
+    ).toHaveLength(0);
+    await modal
+      .getByRole("button", {
+        name: "Открыть фото: Фотография заготовки",
+        exact: true,
+      })
+      .click();
+    await expect(preview).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(preview).not.toBeVisible();
+    await expect(modal).toBeVisible();
+    await expect(
+      modal.getByLabel("Название заготовки", { exact: true }),
+    ).toHaveValue("Фотозаготовка");
     await modal.getByRole("button", { name: "Сохранить", exact: true }).click();
     await expect(
       page.getByRole("heading", { name: "Фотозаготовка", exact: true }),
     ).toBeVisible();
     await expect(page.locator(".k-list img")).toBeVisible();
+    await expect(page.locator(".k-list img")).toHaveCSS(
+      "object-fit",
+      "contain",
+    );
+    await page
+      .getByRole("button", { name: "Открыть фото: Фотозаготовка", exact: true })
+      .click();
+    const viewer = page.getByRole("dialog", {
+      name: "Фотозаготовка",
+      exact: true,
+    });
+    await expect(viewer).toBeVisible();
+    await expect
+      .poll(() =>
+        viewer
+          .locator("img")
+          .evaluate(
+            (img: HTMLImageElement) => img.naturalWidth / img.naturalHeight,
+          ),
+      )
+      .toBe(0.5);
+    expect(await viewer.evaluate((d) => d.scrollWidth <= d.clientWidth)).toBe(
+      true,
+    );
+    await viewer.getByRole("button", { name: "Закрыть", exact: true }).click();
+    await expect(viewer).not.toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: "Открыть фото: Фотозаготовка",
+        exact: true,
+      }),
+    ).toBeFocused();
+    await page.reload();
+    await expect(page.locator(".k-list img")).toHaveCSS(
+      "object-fit",
+      "contain",
+    );
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
     expect(
       (
         await b.query<{ photo_path: string }>(

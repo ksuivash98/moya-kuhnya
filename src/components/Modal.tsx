@@ -33,7 +33,12 @@ export default function Modal({
     >
       <div className="modal-head">
         <h2 id={titleId}>{title}</h2>
-        <button className="icon-button" aria-label="Закрыть" onClick={onClose}>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Закрыть"
+          onClick={onClose}
+        >
           <X size={20} />
         </button>
       </div>
