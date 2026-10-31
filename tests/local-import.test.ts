@@ -15,9 +15,9 @@ describe("локальный разбор рецептов", () => {
     expect(r.ingredients[1].name).toBe("Мука");
     expect(r.steps).toEqual(["Смешать.", "Обжарить."]);
   });
-  it("не выдумывает количество для диапазонов, дробей и неизвестных единиц", () => {
+  it("не выдумывает количество для диапазонов, неточных дробей и неизвестных единиц", () => {
     const source =
-      "Суп\nИнгредиенты\n1/2 л воды\n2–3 шт. картофеля\nЩепотка соли\nПриготовление\nВарить.";
+      "Суп\nИнгредиенты\n1/3 л воды\n2–3 шт. картофеля\nЩепотка соли\nПриготовление\nВарить.";
     const r = parseRecipeText(source);
     expect(r.ingredients.every((i) => i.amount === null)).toBe(true);
     expect(r.notes).toBe(source);
@@ -50,4 +50,44 @@ describe("локальный разбор рецептов", () => {
       ),
     ).toThrow("максимум");
   });
+});
+
+it("преобразует точные обычные, смешанные и типографские дроби", () => {
+  const r = parseRecipeText(
+    "Тесто\nИнгредиенты\n1/2 л молока\nМука 1 1/2 стакана\n¼ ч. л. соли\n2½ ст. л. масла\nПриготовление\nСмешать.",
+  );
+  expect(r.ingredients.map((i) => i.amount)).toEqual([
+    "0.5",
+    "1.5",
+    "0.25",
+    "2.5",
+  ]);
+  expect(r.ingredients.map((i) => i.unit)).toEqual([
+    "л",
+    "стакан",
+    "ч. л.",
+    "ст. л.",
+  ]);
+});
+it("не подставляет границы диапазона или неверный знаменатель", () => {
+  const r = parseRecipeText(
+    "Суп\nИнгредиенты\nВода 1–2 л\nСоль 1/0 г\nМука 1/3 стакана\nПриготовление\nВарить.",
+  );
+  expect(r.ingredients.every((i) => i.amount === null)).toBe(true);
+  expect(r.ingredients[0].name).toBe("Вода");
+  expect(r.ingredients[0].note).toContain("1–2");
+  expect(r.warnings.join()).toContain("Вода");
+});
+it("отличает нумерованные ингредиенты от шагов и понимает текст без заголовков", () => {
+  const r = parseRecipeText(
+    "Каша\nИнгредиенты: молоко 200 мл\n1. Крупа 100 г\nСмешать в кастрюле.\n2. Варить 10 минут.",
+  );
+  expect(r.ingredients).toHaveLength(2);
+  expect(r.ingredients[1].name).toBe("Крупа");
+  expect(r.steps).toHaveLength(2);
+  const plain = parseRecipeText(
+    "Салат\nМасло 1 столовая ложка\nСмешать ингредиенты.",
+  );
+  expect(plain.ingredients[0].unit).toBe("ст. л.");
+  expect(plain.steps).toEqual(["Смешать ингредиенты."]);
 });

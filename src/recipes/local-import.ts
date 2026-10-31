@@ -4,40 +4,75 @@ import {
 } from "../../supabase/functions/_shared/recipe-import";
 
 const unitPattern =
-  "(?:кг|килограмм(?:а|ов)?|грамм(?:а|ов)?|гр\\.?|г|мл|миллилитр(?:а|ов)?|литр(?:а|ов)?|л|шт\\.?|штук[аи]?|ст\\.?\\s*л\\.?|ч\\.?\\s*л\\.?|стакан(?:а|ов)?|упаковк[аи]?)";
-const quantityPattern = `(?<amount>\\d+(?:[.,]\\d{1,4})?)\\s*(?<unit>${unitPattern})(?=\\s|$|[,;—–-])`;
+  "(?:кг|килограмм(?:а|ов)?|грамм(?:а|ов)?|гр\\.?|г|мл|миллилитр(?:а|ов)?|литр(?:а|ов)?|л|шт\\.?|штук[аи]?|ст\\.?\\s*л\\.?|ч\\.?\\s*л\\.?|столов(?:ая|ые|ых)\\s+лож(?:ка|ки|ек)|чайн(?:ая|ые|ых)\\s+лож(?:ка|ки|ек)|стакан(?:а|ов)?|упаковк[аи]?)";
+const numberPattern = "(?:(?:\\d+\\s+)?\\d+\\s*/\\s*\\d+|\\d+(?:[.,]\\d+)?)";
+const quantityPattern = `(?<amount>${numberPattern}(?:\\s*[-–—]\\s*${numberPattern})?)\\s*(?<unit>${unitPattern})(?=\\s|$|[,;—–-])`;
+const fractions: Record<string, string> = {
+  "½": "1/2",
+  "¼": "1/4",
+  "¾": "3/4",
+  "⅓": "1/3",
+  "⅔": "2/3",
+  "⅛": "1/8",
+  "⅜": "3/8",
+  "⅝": "5/8",
+  "⅞": "7/8",
+};
+function normalize(line: string) {
+  return line
+    .replace(/[\u00a0\u202f]/g, " ")
+    .replace(
+      /(\d)?([½¼¾⅓⅔⅛⅜⅝⅞])/g,
+      (_, whole: string | undefined, fraction: string) =>
+        `${whole ? whole + " " : ""}${fractions[fraction]}`,
+    );
+}
 function unit(raw: string) {
   const s = raw.toLowerCase().replace(/[.\s]/g, "");
-  if (/^к/.test(s)) return "кг";
-  if (/^г/.test(s)) return "г";
+  if (s.startsWith("к")) return "кг";
+  if (s.startsWith("г")) return "г";
   if (/^(мл|милли)/.test(s)) return "мл";
-  if (/^л/.test(s)) return "л";
-  if (/^шт/.test(s)) return "шт.";
-  if (s === "стл") return "ст. л.";
-  if (s === "чл") return "ч. л.";
-  if (/^стак/.test(s)) return "стакан";
+  if (s.startsWith("л")) return "л";
+  if (s.startsWith("шт")) return "шт.";
+  if (s === "стл" || s.startsWith("столов")) return "ст. л.";
+  if (s === "чл" || s.startsWith("чайн")) return "ч. л.";
+  if (s.startsWith("стак")) return "стакан";
   return "упаковка";
 }
-function ingredient(line: string): ExtractedRecipe["ingredients"][number] {
+function amountValue(raw: string): string | null {
+  if (/[-–—]/.test(raw)) return null;
+  const fraction = /^(?:(\d+)\s+)?(\d+)\s*\/\s*(\d+)$/.exec(raw);
+  let value: number;
+  if (fraction) {
+    const denominator = Number(fraction[3]);
+    if (!denominator) return null;
+    value = Number(fraction[1] ?? 0) + Number(fraction[2]) / denominator;
+  } else value = Number(raw.replace(",", "."));
+  // Never round a repeating fraction or silently choose a range endpoint.
+  if (
+    !Number.isFinite(value) ||
+    value <= 0 ||
+    value > 1e9 ||
+    Math.abs(value * 10000 - Math.round(value * 10000)) > 1e-6
+  )
+    return null;
+  return String(Number(value.toFixed(4)));
+}
+function ingredient(raw: string): ExtractedRecipe["ingredients"][number] {
+  const line = normalize(raw.replace(/^\d+[.)]\s+/, ""));
   const match = new RegExp(quantityPattern, "iu").exec(line);
-  if (match?.groups) {
-    const amount = match.groups.amount.replace(",", ".");
-    // Ranges/fractions are deliberately preserved as text, never guessed.
-    if (
-      !/[\d/½¼¾]\s*[-–—/]\s*$/.test(line.slice(0, match.index)) &&
-      Number(amount) > 0 &&
-      Number(amount) <= 1e9
-    ) {
-      const name = (
-        line.slice(0, match.index) + line.slice(match.index + match[0].length)
-      ).replace(/^[\s:—–-]+|[\s:—–-]+$/g, "");
-      if (name)
-        return {
-          name: name.slice(0, 200),
-          amount,
-          unit: unit(match.groups.unit),
-          note: line.length > 200 ? line.slice(0, 2000) : "",
-        };
+  if (match?.groups && !/[\d/.,-]$/.test(line.slice(0, match.index))) {
+    const name = (
+      line.slice(0, match.index) + line.slice(match.index + match[0].length)
+    ).replace(/^[\s:—–-]+|[\s:—–-]+$/g, "");
+    if (name) {
+      const amount = amountValue(match.groups.amount);
+      return {
+        name: name.slice(0, 200),
+        amount,
+        unit: unit(match.groups.unit),
+        note: !amount || raw.length > 200 ? raw.slice(0, 2000) : "",
+      };
     }
   }
   const taste = /\s*[-—–:]?\s*по вкусу\s*$/i;
@@ -45,7 +80,7 @@ function ingredient(line: string): ExtractedRecipe["ingredients"][number] {
     name: line.replace(taste, "").trim().slice(0, 200) || line.slice(0, 200),
     amount: null,
     unit: taste.test(line) ? "по вкусу" : null,
-    note: line.slice(0, 2000),
+    note: raw.slice(0, 2000),
   };
 }
 export function parseRecipeText(source: string): ExtractedRecipe {
@@ -53,6 +88,11 @@ export function parseRecipeText(source: string): ExtractedRecipe {
     throw new Error("Введите текст рецепта длиной до 20 000 символов.");
   const lines = source
     .replace(/\r/g, "")
+    .replace(
+      /^(ингредиенты|состав|способ приготовления|приготовление)[ \t]*:[ \t]*(.+)$/gim,
+      (all, heading: string, rest: string) =>
+        /^\d+\s*мин/i.test(rest) ? all : `${heading}:\n${rest}`,
+    )
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean);
@@ -104,17 +144,23 @@ export function parseRecipeText(source: string): ExtractedRecipe {
         +time[2];
       continue;
     }
-    if (section === "steps" || /^\d+[.)]\s+/.test(line)) {
-      section = "steps";
-      result.steps.push(line.replace(/^\d+[.)]\s+/, ""));
-      continue;
-    }
+    const instruction =
+      /^(смеша|добавьте|обжар|нареж|взбей|выпека|варите|варить|перемеша|разогре|запека)/i.test(
+        line,
+      );
     if (
-      section === "ingredients" ||
-      new RegExp(quantityPattern, "iu").test(line) ||
-      /по вкусу$/i.test(line)
+      section !== "steps" &&
+      !instruction &&
+      (section === "ingredients" ||
+        new RegExp(quantityPattern, "iu").test(normalize(line)) ||
+        /по вкусу$/i.test(line))
     ) {
       result.ingredients.push(ingredient(line));
+      continue;
+    }
+    if (section === "steps" || /^\d+[.)]\s+/.test(line) || instruction) {
+      section = "steps";
+      result.steps.push(line.replace(/^\d+[.)]\s+/, ""));
       continue;
     }
     if (!result.title)
@@ -127,6 +173,19 @@ export function parseRecipeText(source: string): ExtractedRecipe {
   if (result.ingredients.length > 100 || result.steps.length > 100)
     throw new Error(
       "Слишком много ингредиентов или шагов: максимум по 100. Разделите рецепт.",
+    );
+  const uncertain = result.ingredients.filter(
+    (i) => i.amount === null && i.unit !== "по вкусу",
+  );
+  if (uncertain.length)
+    result.warnings.push(
+      `Проверьте количество: ${uncertain
+        .map((i) => i.name)
+        .join(", ")
+        .slice(
+          0,
+          850,
+        )}. Диапазоны и неточные дроби не подставляются автоматически.`,
     );
   return validateExtraction(result);
 }

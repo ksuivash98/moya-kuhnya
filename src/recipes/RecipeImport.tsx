@@ -2,7 +2,8 @@ import { validateExtraction as validateHistory } from "../../supabase/functions/
 import { useEffect, useState, useRef } from "react";
 import Modal from "../components/Modal";
 import { client, errorText } from "../supabase";
-import { PhotoField } from "./Photos";
+import OcrPhotoField from "./OcrPhotoField";
+import { Photo, PhotoField } from "./Photos";
 import {
   imageData,
   recognizeRecipe,
@@ -223,6 +224,28 @@ export default function RecipeImport({
             }
           }}
         >
+          {local && mode === "photo" && (
+            <details open={!photoText}>
+              <summary>Фото и подготовка к распознаванию</summary>
+              <OcrPhotoField
+                disabled={busy}
+                onBusy={(n) => setPhotoBusy((v) => Math.max(0, v + n))}
+                onChange={(blob) => {
+                  setPhotoText(false);
+                  setPhoto(blob);
+                  setText("");
+                  reset();
+                }}
+              />
+
+              {photoText && (
+                <p className="muted">
+                  После изменения обработки нажмите «Распознать рецепт» ещё раз.
+                  Исправленный текст будет заменён.
+                </p>
+              )}
+            </details>
+          )}
           {mode === "text" || (local && photoText) ? (
             <label>
               Текст рецепта
@@ -241,7 +264,7 @@ export default function RecipeImport({
               />
               <small className="muted">{text.length} / 20 000 символов</small>
             </label>
-          ) : (
+          ) : !local ? (
             <>
               <PhotoField
                 label="Фото для распознавания"
@@ -258,9 +281,21 @@ export default function RecipeImport({
               />
               <small className="muted">
                 Одно чёткое изображение с ингредиентами и шагами. После сжатия —
-                до 3 МБ. Исходник не становится фотографией блюда.
+                до 3 МБ для OpenAI; локально — PNG с сохранением деталей.
+                Исходник не становится фотографией блюда.
               </small>
             </>
+          ) : null}
+          {local && mode === "photo" && photoText && photo && (
+            <details>
+              <summary>Сверить с фотографией</summary>
+              <Photo
+                path=""
+                blob={photo}
+                alt="Источник распознанного текста"
+                className="ocr-preview"
+              />
+            </details>
           )}
           {!local && (
             <div className="notice">

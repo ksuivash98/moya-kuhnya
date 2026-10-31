@@ -892,3 +892,20 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
+.ocr-preview {
+  width: 100%;
+  height: auto;
+  max-height: 65vh;
+  aspect-ratio: auto;
+  object-fit: contain;
+  background: var(--photo-bg);
+}
+
+.ocr-photo-field {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
