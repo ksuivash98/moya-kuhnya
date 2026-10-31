@@ -1,4 +1,4 @@
-import { mkdir, copyFile, readdir } from "node:fs/promises";
+import { mkdir, copyFile, readdir, unlink } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 const require = createRequire(import.meta.url);
@@ -19,8 +19,14 @@ for (const pkg of ["tesseract.js", "tesseract.js-core"]) {
 }
 const core = dirname(require.resolve("tesseract.js-core/package.json"));
 for (const name of await readdir(core)) {
-  if (name.endsWith(".wasm.js") || name.endsWith(".wasm"))
+  // The application uses OEM.LSTM_ONLY; keep baseline, SIMD and relaxed SIMD.
+  if (/-lstm\.wasm(?:\.js)?$/.test(name))
     await copyFile(join(core, name), new URL(name, target));
+}
+// Remove only obsolete generated legacy cores, preserving other local files.
+for (const name of await readdir(target)) {
+  if (/^tesseract-core(?:-(?:simd|relaxedsimd))?\.wasm(?:\.js)?$/.test(name))
+    await unlink(new URL(name, target));
 }
 for (const lang of ["rus", "eng"]) {
   const root = dirname(
