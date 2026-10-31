@@ -920,52 +920,6 @@ dialog::backdrop {
   font-size: 12px;
   color: var(--green);
 }
-[data-theme="dark"] {
-  --bg: #121c17;
-  --surface: #1c2821;
-  --text: #e8eee7;
-  --muted: #a3b0a5;
-  --line: #2d3d32;
-  --green: #a1bf91;
-  --pale: #2b3d2d;
-  --hero: #26392b;
-  --pink: #533c34;
-  --shadow: none;
-  color-scheme: dark;
-  background: var(--bg);
-  color: var(--text);
-  --on-green: #14221a;
-  --photo-bg: #29372c;
-}
-[data-theme="dark"] .nav-item {
-  color: #abb7a3;
-}
-[data-theme="dark"] .nav-item.active {
-  color: #c4d5ad;
-}
-[data-theme="dark"] .hero {
-  border-color: var(--line);
-}
-[data-theme="dark"] .hero p {
-  color: #b4bea9;
-}
-[data-theme="dark"] .stat-label,
-[data-theme="dark"] .stat-card small {
-  color: var(--muted);
-}
-[data-theme="dark"] .sage,
-[data-theme="dark"] .rose,
-[data-theme="dark"] .sand,
-[data-theme="dark"] .lavender {
-  background: #374034;
-}
-[data-theme="dark"] .error {
-  background: #452f2c;
-  color: #eab1a9;
-}
-[data-theme="dark"] .hero-label {
-  color: #b5c4a3;
-}
 @media (min-width: 1500px) {
   .hero {
     min-height: 395px;
@@ -1337,22 +1291,6 @@ textarea::placeholder {
   color: var(--muted);
   opacity: 0.65;
 }
-[data-theme="dark"] .hero em {
-  color: #b7d09f;
-}
-[data-theme="dark"] .hero p,
-[data-theme="dark"] .hero-label {
-  color: #afc1a5;
-}
-[data-theme="dark"] .sage,
-[data-theme="dark"] .rose,
-[data-theme="dark"] .sand,
-[data-theme="dark"] .lavender {
-  background: var(--pale);
-}
-[data-theme="dark"] .danger-fill {
-  color: #fff;
-}
 @media (hover: hover) {
   .recipe-card:hover {
     transform: translateY(-3px);
@@ -1376,4 +1314,235 @@ textarea::placeholder {
   .recipe-form .form-grid {
     gap: 18px;
   }
+}
+
+/* «Лавандовый вечер». Все токены и переопределения изолированы тёмной темой. */
+[data-theme="dark"] {
+  --bg: #252730;
+  --sidebar: #2d303b;
+  --topbar: #30333f;
+  --surface: #383b49;
+  --secondary: #444557;
+  --pale: #514b60;
+  --hero: #444557;
+  --green: #c6b5e6;
+  --primary-hover: #d8caf0;
+  --pink: #d4afc5;
+  --text: #f0ecf5;
+  --muted: #c5bfce;
+  --line: #505261;
+  --on-green: #252730;
+  --photo-bg: #444557;
+  --shadow: none;
+  --ring: #c6b5e6;
+  --input: #2d303b;
+  --input-border: #92909f;
+  --destructive: #f2b1ad;
+  --destructive-bg: #54373e;
+  --destructive-button: #e5a19c;
+  --success: #b3d5bd;
+  --success-bg: #32483f;
+  --warning: #ebcf9b;
+  --warning-bg: #4b4032;
+  --overlay: #191a24b3;
+  color-scheme: dark;
+  background: var(--bg);
+  color: var(--text);
+}
+[data-theme="dark"] .sidebar {
+  background: var(--sidebar);
+}
+[data-theme="dark"] :is(.topbar, .bottom-nav) {
+  background: var(--topbar);
+}
+[data-theme="dark"] .family-badge {
+  background: var(--surface);
+}
+[data-theme="dark"] .nav-item {
+  color: var(--muted);
+}
+[data-theme="dark"] .nav-item.active {
+  background: var(--pale);
+  color: var(--text);
+}
+[data-theme="dark"] .nav-item.active svg {
+  color: var(--green);
+}
+[data-theme="dark"] .nav-item:hover {
+  background: var(--secondary);
+  color: var(--text);
+}
+[data-theme="dark"] .brand-icon {
+  color: var(--on-green);
+  box-shadow: none;
+}
+[data-theme="dark"]
+  :is(.sidebar-bottom > p, .subtle-icon, .checklist > * > svg, .check) {
+  color: var(--muted);
+}
+[data-theme="dark"] :is(.hero p, .hero-label) {
+  color: var(--muted);
+}
+[data-theme="dark"]
+  :is(.hero em, .greeting-leaf, .bottom-note svg, .user-avatar) {
+  color: var(--pink);
+}
+[data-theme="dark"] .hero {
+  border-color: var(--line);
+}
+[data-theme="dark"] :is(.tiny-pill, .empty-icon) {
+  background: var(--pale);
+  color: var(--green);
+}
+[data-theme="dark"] .user-avatar {
+  background: var(--pale);
+}
+[data-theme="dark"] :is(.sage, .rose, .sand, .lavender) {
+  background: var(--secondary);
+}
+[data-theme="dark"] .sage {
+  color: var(--success);
+}
+[data-theme="dark"] .rose {
+  color: var(--pink);
+}
+[data-theme="dark"] .sand {
+  color: var(--warning);
+}
+[data-theme="dark"] .lavender {
+  color: var(--green);
+}
+[data-theme="dark"] :is(.dot, .activity-dot) {
+  background: var(--success);
+}
+[data-theme="dark"] .primary {
+  box-shadow: none;
+}
+[data-theme="dark"] .primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+  filter: none;
+}
+[data-theme="dark"] .secondary {
+  background: var(--secondary);
+  color: var(--text);
+}
+[data-theme="dark"] .secondary:hover:not(:disabled) {
+  background: var(--pale);
+  border-color: var(--green);
+}
+[data-theme="dark"] .dialog-actions .secondary {
+  background: var(--sidebar);
+}
+[data-theme="dark"] :is(.danger, .k-danger) {
+  color: var(--destructive);
+}
+[data-theme="dark"] .danger-fill {
+  background: var(--destructive-button);
+  color: var(--on-green);
+}
+[data-theme="dark"] .danger-fill:hover:not(:disabled) {
+  background: var(--destructive);
+}
+[data-theme="dark"] .error {
+  background: var(--destructive-bg);
+  color: var(--destructive);
+  border-color: var(--destructive);
+}
+[data-theme="dark"] .status-bar {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+[data-theme="dark"] :is(.selected.favorite, .recipe-card-favorite.selected) {
+  color: var(--pink);
+}
+[data-theme="dark"] :is(input, select, textarea) {
+  background: var(--input);
+  color: var(--text);
+  border-color: var(--input-border);
+  accent-color: var(--green);
+}
+[data-theme="dark"] :is(input, textarea)::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+[data-theme="dark"] :is(input, select, textarea):focus {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+[data-theme="dark"]
+  :is(button, a, input, select, textarea, summary):focus-visible,
+[data-theme="dark"] .upload-button:focus-within {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+[data-theme="dark"] :is(input, select, textarea)[aria-invalid="true"] {
+  border-color: var(--destructive);
+}
+[data-theme="dark"] input::file-selector-button {
+  background: var(--pale);
+  color: var(--text);
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+}
+[data-theme="dark"] :is(button, input, select, textarea):disabled {
+  opacity: 0.65;
+}
+[data-theme="dark"] dialog {
+  background: var(--surface);
+  box-shadow: 0 20px 60px var(--overlay);
+}
+[data-theme="dark"] dialog::backdrop {
+  background: var(--overlay);
+}
+[data-theme="dark"] .nav-backdrop {
+  background: var(--overlay);
+}
+[data-theme="dark"] .toast {
+  background: var(--secondary);
+  color: var(--text);
+  border: 1px solid var(--input-border);
+}
+[data-theme="dark"] .k-day.is-today {
+  border-color: var(--green);
+}
+[data-theme="dark"] :is(.k-day[aria-selected="true"], .k-day.selected) {
+  background: var(--pale);
+}
+[data-theme="dark"] .k-bar {
+  background: var(--secondary);
+}
+[data-theme="dark"] .k-bars > :nth-child(3n + 2) .k-bar span {
+  background: var(--pink);
+}
+[data-theme="dark"] .k-bars > :nth-child(3n) .k-bar span {
+  background: var(--success);
+}
+@media (hover: hover) {
+  [data-theme="dark"] :is(.recipe-card, .stat-card, .k-item) {
+    transition:
+      background-color 0.18s,
+      border-color 0.18s;
+  }
+  [data-theme="dark"] :is(.recipe-card, .stat-card, .k-item):hover {
+    background: var(--secondary);
+    border-color: var(--input-border);
+    box-shadow: none;
+  }
+}
+/* Более светлый акцент для небольшого текста на выделенной поверхности. */
+[data-theme="dark"]
+  :is(
+    .setup-banner,
+    .recipe-category,
+    .step-number,
+    .theme-picker .selected,
+    .view-toggle .selected,
+    .check.done,
+    .avatar,
+    .k-day .k-actions
+  ) {
+  color: var(--primary-hover);
+}
+[data-theme="dark"] .setup-banner a {
+  color: var(--text);
 }
