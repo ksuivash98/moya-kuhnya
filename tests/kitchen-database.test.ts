@@ -41,6 +41,7 @@ beforeAll(async () => {
     "202610290009_recipe_import.sql",
     "202610310010_recipe_freezing.sql",
     "202610310011_shopping_categories.sql",
+    "202610310012_clear_shopping.sql",
   ]) {
     if (file === "202610310011_shopping_categories.sql")
       await db.exec(`
@@ -742,5 +743,99 @@ test("миграция категорий исправляет старые от
     ["лимон", "Другое", "purchased", 2],
     ["соль", "Мясо", "open", 3],
   ]);
+  await user();
+});
+
+test("очистка покупок атомарна, повторяема и сохраняет другие месяцы, новые позиции и финансовую историю", async () => {
+  await user();
+  const product = crypto.randomUUID();
+  await op("product_save", {
+    id: product,
+    name: "Тест очистки",
+    unit: "г",
+    minimum: 0,
+    category: "Другое",
+    archived: false,
+  });
+  const add = async (month = "2099-12-01") => {
+    const id = crypto.randomUUID();
+    await op("shopping_save", {
+      id,
+      product_id: product,
+      quantity: 1,
+      unit: "г",
+      month,
+      status: "open",
+    });
+    return { id, version: 1 };
+  };
+  const items = [];
+  for (let i = 0; i < 25; i++) items.push(await add());
+  const anotherMonth = await add("2099-10-01");
+  const purchased = await add();
+  await op("purchase_confirm", {
+    ...purchased,
+    quantity: 1,
+    unit: "г",
+    amount: "10",
+    date: "2099-12-02",
+  });
+  const snapshot = () =>
+    scalar(
+      "select jsonb_build_object('paid',(select jsonb_agg(to_jsonb(p)) from public.purchases p where family_id=$1),'money',(select jsonb_agg(to_jsonb(m)) from public.financial_movements m where family_id=$1),'stock',(select jsonb_agg(to_jsonb(b)) from public.stock_batches b where family_id=$1))",
+      [family],
+    );
+  const before = await snapshot();
+  await expect(
+    op("shopping_clear", {
+      month: "2099-12-01",
+      items: [...items.slice(0, -1), { ...items[24], version: 99 }],
+    }),
+  ).rejects.toThrow("другом устройстве");
+  expect(
+    await scalar(
+      "select count(*)::int from public.shopping_items where month='2099-12-01' and status='open'",
+    ),
+  ).toBe(25);
+  await expect(
+    op("shopping_clear", {
+      month: "2099-12-01",
+      items: [items[0], anotherMonth],
+    }),
+  ).rejects.toThrow("другом устройстве");
+  await expect(
+    op("shopping_clear", { month: "2099-12-01", items: [items[0], items[0]] }),
+  ).rejects.toThrow("Некорректный");
+  const addedLater = await add();
+  const key = crypto.randomUUID();
+  const payload = { month: "2099-12-01", items };
+  await op("shopping_clear", payload, key);
+  await op("shopping_clear", payload, key);
+  expect(
+    await scalar(
+      "select count(*)::int from public.shopping_items where month='2099-12-01' and status='cancelled'",
+    ),
+  ).toBe(25);
+  expect(
+    await scalar("select status from public.shopping_items where id=$1", [
+      anotherMonth.id,
+    ]),
+  ).toBe("open");
+  expect(
+    await scalar("select status from public.shopping_items where id=$1", [
+      addedLater.id,
+    ]),
+  ).toBe("open");
+  expect(
+    await scalar("select status from public.shopping_items where id=$1", [
+      purchased.id,
+    ]),
+  ).toBe("purchased");
+  expect(await snapshot()).toEqual(before);
+  await expect(
+    db.query("select public._shopping_clear($1,$2)", [family, payload]),
+  ).rejects.toThrow("permission denied");
+  await user(other);
+  await expect(op("shopping_clear", payload)).rejects.toThrow("Нет права");
   await user();
 });

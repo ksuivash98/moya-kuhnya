@@ -354,3 +354,11 @@ details .checkbox-label {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+
+.shopping-clear-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 20px;
+}

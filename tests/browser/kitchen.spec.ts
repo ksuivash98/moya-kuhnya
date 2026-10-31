@@ -639,3 +639,115 @@ test("мои продукты: понятный путь от названия �
     await b.close();
   }
 });
+
+test("очистить покупки: подтверждение, все страницы и сохранение оплаченной покупки", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  const month = day().slice(0, 7) + "-01";
+  try {
+    const product = crypto.randomUUID();
+    await b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+      b.family,
+      crypto.randomUUID(),
+      "product_save",
+      {
+        id: product,
+        name: "Продукт для очистки",
+        category: "Другое",
+        unit: "г",
+        minimum: 0,
+        archived: false,
+      },
+    ]);
+    const ids = [];
+    for (let i = 0; i < 26; i++) {
+      const id = crypto.randomUUID();
+      ids.push(id);
+      await b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        "shopping_save",
+        {
+          id,
+          product_id: product,
+          quantity: 1,
+          unit: "г",
+          month,
+          status: "open",
+        },
+      ]);
+    }
+    await b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+      b.family,
+      crypto.randomUUID(),
+      "purchase_confirm",
+      {
+        id: ids[0],
+        version: 1,
+        quantity: 1,
+        unit: "г",
+        amount: 10,
+        date: day(),
+      },
+    ]);
+    await page.goto("/shopping");
+    const clear = page.getByRole("button", {
+      name: "Очистить покупки",
+      exact: true,
+    });
+    await clear.click();
+    const modal = page.getByRole("dialog", {
+      name: "Очистить покупки?",
+      exact: true,
+    });
+    await expect(modal).toContainText("25 позиций");
+    await modal.getByRole("button", { name: "Отмена", exact: true }).click();
+    await expect(modal).not.toBeVisible();
+    expect(
+      (
+        await b.query(
+          "select id from public.shopping_items where status='open'",
+        )
+      ).rows,
+    ).toHaveLength(25);
+    await clear.click();
+    await modal
+      .getByRole("button", { name: "Очистить список", exact: true })
+      .click();
+    await expect(modal).not.toBeVisible();
+    await expect(clear).toBeDisabled();
+    await expect(
+      page.getByText("Список покупок пуст.", { exact: false }),
+    ).toBeVisible();
+    expect(
+      (
+        await b.query(
+          "select id from public.shopping_items where status='cancelled'",
+        )
+      ).rows,
+    ).toHaveLength(25);
+    expect(
+      (
+        await b.query(
+          "select id from public.shopping_items where status='purchased'",
+        )
+      ).rows,
+    ).toHaveLength(1);
+    expect(
+      (await b.query("select id from public.purchases")).rows,
+    ).toHaveLength(1);
+    expect((await b.query("select id from public.expenses")).rows).toHaveLength(
+      1,
+    );
+    await page.reload();
+    await expect(clear).toBeDisabled();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  } finally {
+    await b.close();
+  }
+});

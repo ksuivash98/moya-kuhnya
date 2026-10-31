@@ -1,6 +1,7 @@
 import { useSearchParams } from "react-router-dom";
 import { useState } from "react";
 import type { ModuleProps } from "./KitchenPage";
+import Modal from "../components/Modal";
 import Fields, { type Field } from "./Fields";
 import { mutate } from "./api";
 import {
@@ -26,6 +27,40 @@ export default function Finance({
   notify,
 }: ModuleProps & { kind: string }) {
   const [params] = useSearchParams();
+  const [clearRequest, setClearRequest] = useState<{
+    key: string;
+    month: string;
+    items: { id: string; version: number }[];
+  } | null>(null);
+  const [clearError, setClearError] = useState("");
+  async function clearShopping() {
+    if (!clearRequest || busy) return;
+    setBusy(true);
+    setClearError("");
+    try {
+      await mutate(
+        family,
+        "shopping_clear",
+        { month: clearRequest.month, items: clearRequest.items },
+        clearRequest.key,
+      );
+      await reload();
+      setPage(0);
+      setClearRequest(null);
+      notify(
+        "Выбранные позиции убраны из покупок. История оплаченных покупок сохранена.",
+      );
+    } catch (e) {
+      const message = errorText(e);
+      setClearError(
+        /Действие недоступно/i.test(message)
+          ? "Для очистки покупок примените миграцию 012 в Supabase. Список не изменён."
+          : message,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
   const [dialog, setDialog] = useState<{ action: string; row?: Row } | null>(
       null,
     ),
@@ -260,6 +295,23 @@ export default function Finance({
                 >
                   Добавить вручную
                 </button>
+                <button
+                  className="secondary danger"
+                  disabled={busy || !navigator.onLine || !list.length}
+                  onClick={() => {
+                    setClearError("");
+                    setClearRequest({
+                      key: crypto.randomUUID(),
+                      month: month + "-01",
+                      items: list.map((r) => ({
+                        id: r.id,
+                        version: r.version,
+                      })),
+                    });
+                  }}
+                >
+                  Очистить покупки
+                </button>
               </>
             ) : (
               <>
@@ -410,6 +462,48 @@ export default function Finance({
               </div>
             ))}
         </section>
+      )}
+      {clearRequest && (
+        <Modal
+          title="Очистить покупки?"
+          onClose={() => !busy && setClearRequest(null)}
+        >
+          <p className="muted">
+            Убрать {clearRequest.items.length} позиций «Нужно купить» за{" "}
+            {new Date(clearRequest.month + "T00:00:00Z").toLocaleDateString(
+              "ru-RU",
+              { month: "long", year: "numeric", timeZone: "UTC" },
+            )}
+            ?
+          </p>
+          <p className="notice">
+            Оплаченные покупки, расходы, запасы и другие месяцы сохранятся. При
+            новом расчёте по меню недостающие продукты могут появиться снова.
+          </p>
+          {clearError && (
+            <p className="error" role="alert">
+              {clearError}
+            </p>
+          )}
+          <div className="shopping-clear-actions">
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() => setClearRequest(null)}
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              className="secondary danger"
+              disabled={busy || !navigator.onLine}
+              onClick={() => void clearShopping()}
+            >
+              {busy ? "Очищаем…" : "Очистить список"}
+            </button>
+          </div>
+        </Modal>
       )}
       {dialog && (
         <Fields
