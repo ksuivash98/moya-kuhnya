@@ -40,8 +40,21 @@ beforeAll(async () => {
     "202610290008_sync_guards.sql",
     "202610290009_recipe_import.sql",
     "202610310010_recipe_freezing.sql",
-  ])
+    "202610310011_shopping_categories.sql",
+  ]) {
+    if (file === "202610310011_shopping_categories.sql")
+      await db.exec(`
+      insert into public.families(id,name) values('dddddddd-dddd-4ddd-8ddd-dddddddddddd','Старая семья');
+      insert into public.products(id,family_id,name,name_key,category) values
+      ('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee','dddddddd-dddd-4ddd-8ddd-dddddddddddd','лимон','лимон','Другое'),
+      ('ffffffff-ffff-4fff-8fff-ffffffffffff','dddddddd-dddd-4ddd-8ddd-dddddddddddd','соль','соль','Мясо');
+      insert into public.shopping_items(family_id,product_id,quantity,unit,month,status,category) values
+      ('dddddddd-dddd-4ddd-8ddd-dddddddddddd','eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',1,'шт.','2099-10-01','open','Другое'),
+      ('dddddddd-dddd-4ddd-8ddd-dddddddddddd','eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',2,'шт.','2099-10-01','purchased','Другое'),
+      ('dddddddd-dddd-4ddd-8ddd-dddddddddddd','ffffffff-ffff-4fff-8fff-ffffffffffff',3,'г','2099-10-01','open','Другое');
+    `);
     await db.exec(readFileSync("supabase/migrations/" + file, "utf8"));
+  }
   await db.query("insert into auth.users(id)values($1),($2)", [owner, other]);
   await user();
   family = (await scalar(
@@ -576,4 +589,158 @@ test("импорт: квота учитывает неудачные запро�
   expect(
     await scalar("select count(*)::int from public.recipe_import_requests"),
   ).toBe(5);
+});
+
+test("категории: словарь различает продукты и не угадывает неизвестные смеси", async () => {
+  await user();
+  for (const [name, category] of [
+    [" ЧЁРНЫЙ   МОЛОТЫЙ ПЕРЕЦ ", "Специи"],
+    ["соль", "Специи"],
+    ["лимон", "Фрукты"],
+    ["лук репчатый", "Овощи"],
+    ["болгарский перец", "Овощи"],
+    ["творог", "Молочные продукты"],
+    ["масло", "Другое"],
+    ["соус из лимона и перца", "Другое"],
+  ])
+    expect(
+      await scalar("select public.suggest_product_category($1)", [name]),
+    ).toBe(category);
+});
+test("категории покупок: ручной выбор, пересчёт, идемпотентность и неизменная история", async () => {
+  await user();
+  const rid = crypto.randomUUID(),
+    mid = crypto.randomUUID();
+  await db.query("select public.save_recipe($1,$2,$3,null)", [
+    rid,
+    family,
+    {
+      title: "Лимон для категорий",
+      category: "Другие",
+      prep: 0,
+      cook: 1,
+      servings: 1,
+      difficulty: "Легко",
+      ingredients: [
+        { id: crypto.randomUUID(), name: "лимон", amount: "1", unit: "шт." },
+      ],
+      steps: [{ id: crypto.randomUUID(), text: "Нарезать" }],
+    },
+  ]);
+  await op("menu_save", {
+    id: mid,
+    recipe_id: rid,
+    month: "2099-11-01",
+    date: "",
+    meal: "Другое",
+    servings: 1,
+    planned_count: 1,
+    status: "Запланировано",
+  });
+  await op("shopping_generate", { month: "2099-11-01" });
+  const get = () =>
+    db.query<{
+      id: string;
+      product_id: string;
+      version: number;
+      category: string;
+    }>(
+      "select * from public.shopping_items where family_id=$1 and month='2099-11-01' and status='open'",
+      [family],
+    );
+  let item = (await get()).rows[0];
+  expect(item.category).toBe("Фрукты");
+  await op("purchase_confirm", {
+    id: item.id,
+    version: item.version,
+    quantity: 1,
+    unit: "шт.",
+    amount: "10",
+    date: "2099-11-02",
+  });
+  // Ещё одна открытая позиция того же продукта.
+  const id = crypto.randomUUID();
+  await op("shopping_save", {
+    id,
+    product_id: item.product_id,
+    quantity: 2,
+    unit: "шт.",
+    month: "2099-11-01",
+    status: "open",
+  });
+  item = (await get()).rows[0];
+  const key = crypto.randomUUID();
+  const edit = {
+    ...item,
+    month: "2099-11-01",
+    quantity: 2,
+    unit: "шт.",
+    status: "open",
+    category: "Другое",
+  };
+  await op("shopping_save_categorized", edit, key);
+  const version = (await get()).rows[0].version;
+  await op("shopping_save_categorized", edit, key);
+  expect((await get()).rows[0].version).toBe(version);
+  expect(
+    await scalar("select category_manual from public.products where id=$1", [
+      item.product_id,
+    ]),
+  ).toBe(true);
+  expect((await get()).rows[0].category).toBe("Другое");
+  expect(
+    await scalar(
+      "select category from public.expenses where title='лимон' order by date desc limit 1",
+    ),
+  ).toBe("Фрукты");
+  expect(
+    await scalar(
+      "select category from public.shopping_items where product_id=$1 and status='purchased'",
+      [item.product_id],
+    ),
+  ).toBe("Фрукты");
+  await op("shopping_generate", { month: "2099-11-01" });
+  expect((await get()).rows.every((r) => r.category === "Другое")).toBe(true);
+  await expect(
+    op("shopping_save_categorized", {
+      ...edit,
+      version,
+      category: "Несуществующая",
+    }),
+  ).rejects.toThrow("Выберите категорию");
+  await expect(
+    db.query("select public._finance_action($1,$2,$3,$4)", [
+      family,
+      crypto.randomUUID(),
+      "shopping_save_categorized",
+      edit,
+    ]),
+  ).rejects.toThrow("permission denied");
+  await user(other);
+  await expect(op("shopping_save_categorized", edit)).rejects.toThrow(
+    "Нет права",
+  );
+  await user();
+});
+
+test("миграция категорий исправляет старые открытые позиции и сохраняет выбранное и историю", async () => {
+  await db.exec("reset role");
+  const items = (
+    await db.query<{
+      name: string;
+      category: string;
+      status: string;
+      quantity: number;
+    }>(
+      "select p.name,s.category,s.status,s.quantity from public.shopping_items s join public.products p on p.id=s.product_id where s.family_id='dddddddd-dddd-4ddd-8ddd-dddddddddddd' order by s.quantity",
+    )
+  ).rows;
+  expect(
+    items.map((i) => [i.name, i.category, i.status, Number(i.quantity)]),
+  ).toEqual([
+    ["лимон", "Фрукты", "open", 1],
+    ["лимон", "Другое", "purchased", 2],
+    ["соль", "Мясо", "open", 3],
+  ]);
+  await user();
 });

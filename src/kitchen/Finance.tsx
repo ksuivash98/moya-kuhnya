@@ -130,6 +130,18 @@ export default function Finance({
                 required: true,
               },
               {
+                key: "category",
+                label: "Категория",
+                options: [
+                  {
+                    value: "__auto__",
+                    label: "Категория продукта / автоматически",
+                  },
+                  ...opts(productCategories),
+                ],
+                hint: "Ручной выбор сохранится для продукта и его открытых покупок. Пересчёт его не сбросит.",
+              },
+              {
                 key: "quantity",
                 label: "Количество",
                 type: "number",
@@ -422,10 +434,29 @@ export default function Finance({
             category: "Другое",
             status: "open",
             ...dialog.row,
+            ...(action === "shopping_save" ? { category: "__auto__" } : {}),
           }}
           onClose={() => setDialog(null)}
           onSave={async (d, k) => {
-            await mutate(family, dialog.action, d, k);
+            try {
+              await mutate(
+                family,
+                dialog.action === "shopping_save"
+                  ? "shopping_save_categorized"
+                  : dialog.action,
+                d,
+                k,
+              );
+            } catch (e) {
+              if (
+                dialog.action === "shopping_save" &&
+                /Действие недоступно/i.test(errorText(e))
+              )
+                throw new Error(
+                  "Для выбора категорий покупок примените миграцию 011 в Supabase. Изменения остаются в форме.",
+                );
+              throw e;
+            }
             await reload();
             notify("Операция сохранена без повторного учёта.");
           }}

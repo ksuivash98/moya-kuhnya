@@ -432,3 +432,54 @@ test("большая книга выводится страницами, пои�
     await b.close();
   }
 });
+
+test("категории покупок: автоматическая подсказка и ручной выбор после пересчёта", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    await b.save("Рецепт с творогом");
+    await page.goto("/menu");
+    await page
+      .getByRole("button", { name: "Добавить блюдо", exact: true })
+      .click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Сохранить", exact: true })
+      .click();
+    await page.goto("/shopping");
+    const generate = page.getByRole("button", {
+      name: "Рассчитать недостающие продукты",
+      exact: true,
+    });
+    await generate.click();
+    const item = page
+      .locator("article.k-item")
+      .filter({
+        has: page.getByRole("heading", { name: "творог", exact: true }),
+      });
+    await expect(item.locator(".pill")).toHaveText("Молочные продукты");
+    await item
+      .getByRole("button", { name: "Изменить / удалить", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog");
+    await dialog
+      .getByLabel("Категория", { exact: false })
+      .selectOption("Другое");
+    await dialog
+      .getByRole("button", { name: "Сохранить", exact: true })
+      .click();
+    await expect(item.locator(".pill")).toHaveText("Другое");
+    await generate.click();
+    await expect(item.locator(".pill")).toHaveText("Другое");
+    await page.reload();
+    await expect(item.locator(".pill")).toHaveText("Другое");
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  } finally {
+    await b.close();
+  }
+});

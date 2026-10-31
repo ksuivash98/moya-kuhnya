@@ -30,6 +30,7 @@ export async function recipeBackend(
     "202610290008_sync_guards.sql",
     "202610290009_recipe_import.sql",
     "202610310010_recipe_freezing.sql",
+    "202610310011_shopping_categories.sql",
   ])
     await db.exec(readFileSync(`supabase/migrations/${file}`, "utf8"));
   for (const id of [owner, child])
