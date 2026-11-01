@@ -18,7 +18,12 @@ import {
 import Modal from "../components/Modal";
 import { client, configured, errorText, supabase } from "../supabase";
 import { archiveRecipe, loadRecipes, setFavorite } from "./api";
-import { categories, selectRecipes, type Recipe } from "./model";
+import {
+  categories,
+  recipeCategories,
+  selectRecipes,
+  type Recipe,
+} from "./model";
 import RecipeForm from "./RecipeForm";
 import RecipeView from "./RecipeView";
 import RecipeImport from "./RecipeImport";
@@ -47,7 +52,9 @@ export default function RecipesPage({
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [query, setQuery] = useState(""),
-    [category, setCategory] = useState("Все рецепты"),
+    [category, setCategory] = useState<string[]>([]),
+    [favoriteOnly, setFavoriteOnly] = useState(false),
+    [categoryMatch, setCategoryMatch] = useState<"any" | "all">("any"),
     [sort, setSort] = useState("Дата добавления"),
     [chooser, setChooser] = useState(false),
     [importMode, setImportMode] = useState(""),
@@ -138,8 +145,18 @@ export default function RecipesPage({
       setBusy(false);
     }
   }
-  const filtered = selectRecipes(recipes, query, category, sort);
-  useEffect(() => setPage(0), [query, category, sort]);
+  const filtered = selectRecipes(
+    recipes,
+    query,
+    category,
+    sort,
+    favoriteOnly,
+    categoryMatch,
+  );
+  useEffect(
+    () => setPage(0),
+    [query, category, sort, favoriteOnly, categoryMatch],
+  );
   useEffect(
     () =>
       setPage((p) =>
@@ -323,13 +340,62 @@ export default function RecipesPage({
             {["Все рецепты", "Избранное", ...categories].map((c) => (
               <button
                 key={c}
-                className={category === c ? "active" : ""}
-                aria-pressed={category === c}
-                onClick={() => setCategory(c)}
+                className={
+                  (
+                    c === "Все рецепты"
+                      ? !category.length && !favoriteOnly
+                      : c === "Избранное"
+                        ? favoriteOnly
+                        : category.includes(c)
+                  )
+                    ? "active"
+                    : ""
+                }
+                aria-pressed={
+                  c === "Все рецепты"
+                    ? !category.length && !favoriteOnly
+                    : c === "Избранное"
+                      ? favoriteOnly
+                      : category.includes(c)
+                }
+                onClick={() => {
+                  if (c === "Все рецепты") {
+                    setCategory([]);
+                    setFavoriteOnly(false);
+                    setCategoryMatch("any");
+                  } else if (c === "Избранное") setFavoriteOnly((v) => !v);
+                  else
+                    setCategory((v) =>
+                      v.includes(c)
+                        ? v.filter((item) => item !== c)
+                        : [...v, c],
+                    );
+                }}
               >
                 {c === "Избранное" && <Heart size={13} />} {c}
               </button>
             ))}
+          </div>
+          <div className="recipe-category-filter-help">
+            <p className="help-text">
+              Можно выбрать несколько категорий. Поиск и избранное учитываются
+              вместе с ними.
+            </p>
+            {category.length > 1 && (
+              <label>
+                Совпадение категорий
+                <select
+                  aria-label="Совпадение категорий"
+                  value={categoryMatch}
+                  onChange={(e) =>
+                    setCategoryMatch(e.target.value as "any" | "all")
+                  }
+                >
+                  <option value="any">Любая из выбранных</option>
+                  <option value="all">Все выбранные</option>
+                </select>
+              </label>
+            )}
           </div>
           <div className="recipe-results">
             <span>
@@ -370,7 +436,13 @@ export default function RecipesPage({
                     />
                   </button>
                   <div className="recipe-card-content">
-                    <span className="recipe-category">{r.data.category}</span>
+                    <div className="recipe-categories">
+                      {recipeCategories(r.data).map((c) => (
+                        <span className="recipe-category" key={c}>
+                          {c}
+                        </span>
+                      ))}
+                    </div>
                     <h2>
                       <button onClick={() => setParams({ recipe: r.id })}>
                         {r.data.title}
@@ -416,7 +488,9 @@ export default function RecipesPage({
                   className="secondary"
                   onClick={() => {
                     setQuery("");
-                    setCategory("Все рецепты");
+                    setCategory([]);
+                    setFavoriteOnly(false);
+                    setCategoryMatch("any");
                   }}
                 >
                   Сбросить фильтры

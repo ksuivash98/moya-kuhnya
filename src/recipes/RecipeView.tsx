@@ -13,7 +13,7 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
-import { quantity, type Recipe } from "./model";
+import { quantity, recipeCategories, type Recipe } from "./model";
 import { Photo } from "./Photos";
 import { viewRecipe } from "./api";
 import { errorText } from "../supabase";
@@ -55,7 +55,13 @@ export default function RecipeView({
       </button>
       <div className="detail-title">
         <div>
-          <span className="pill quiet">{d.category}</span>
+          <div className="recipe-categories">
+            {recipeCategories(d).map((c) => (
+              <span className="pill quiet" key={c}>
+                {c}
+              </span>
+            ))}
+          </div>
           <h1>{d.title}</h1>
         </div>
         <div className="detail-actions">

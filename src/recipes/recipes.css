@@ -863,3 +863,84 @@ img.recipe-photo.detail-cover,
 img.recipe-photo.detail-cover {
   max-height: min(65vh, 640px);
 }
+
+.recipe-category-field {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  grid-column: 1 / -1;
+}
+.recipe-category-field legend {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.recipe-category-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.recipe-category-choices label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 12px;
+  cursor: pointer;
+}
+.recipe-category-choices label:has(:checked) {
+  background: var(--pale);
+  border-color: var(--green);
+}
+.recipe-category-choices input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  padding: 0;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--green);
+}
+.recipe-category-choices input[type="checkbox"]:focus {
+  box-shadow: none;
+}
+@media (max-width: 720px) {
+  .recipe-category-choices label {
+    min-height: 44px;
+  }
+}
+.recipe-category-choices label:focus-within {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+.recipe-category-filter-help {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 10px 0 16px;
+}
+.recipe-category-filter-help label {
+  max-width: 100%;
+  font-size: 12px;
+}
+.recipe-category-filter-help select {
+  margin-top: 4px;
+}
+.recipe-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  grid-column: 1;
+}
+.recipe-categories > :is(.pill, .recipe-category) {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

@@ -13,6 +13,7 @@ import {
   blankIngredient,
   blankStep,
   categories,
+  recipeCategories,
   units,
   moveStep,
   validate,
@@ -291,25 +292,41 @@ export default function RecipeForm({
                 />
               </label>
               <div className="form-grid">
-                <label>
-                  Категория
-                  <select
-                    aria-label="Категория"
-                    aria-describedby="recipe-category-help"
-                    value={data.category}
-                    onChange={(e) => change("category", e.target.value)}
-                  >
+                <fieldset
+                  className="recipe-category-field"
+                  aria-describedby="recipe-category-help"
+                >
+                  <legend>Категории</legend>
+                  <div className="recipe-category-choices">
                     {categories.map((c) => (
-                      <option key={c}>{c}</option>
+                      <label key={c}>
+                        <input
+                          type="checkbox"
+                          checked={recipeCategories(data).includes(c)}
+                          onChange={(e) => {
+                            const selected = e.target.checked
+                              ? [...recipeCategories(data), c]
+                              : recipeCategories(data).filter(
+                                  (item) => item !== c,
+                                );
+                            markDirty();
+                            setData((prev) => ({
+                              ...prev,
+                              category: selected[0] ?? "",
+                              categories: selected,
+                            }));
+                          }}
+                        />
+                        {c}
+                      </label>
                     ))}
-                  </select>
+                  </div>
                   <small id="recipe-category-help" className="help-text">
-                    Мясные и рыбные блюда — без гарнира в рецепте. «Блюда с
-                    гарниром» — например, плов или рыба с картофелем. «Гарниры»
-                    — отдельно рис, овощи или картофель. «Основные блюда» — если
-                    категория пока не уточнена.
+                    Можно выбрать несколько. Например, «Рыбные блюда» и «Блюда с
+                    гарниром» для рыбы с картофелем; «Гарниры» — для отдельного
+                    гарнира. Оставьте хотя бы одну категорию.
                   </small>
-                </label>
+                </fieldset>
                 <label>
                   Сложность
                   <select

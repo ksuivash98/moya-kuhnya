@@ -37,7 +37,10 @@ export default function Planning({
 }: {
   kind: string;
   state: State;
-  recipes: { id: string; data: { title: string; category?: string } }[];
+  recipes: {
+    id: string;
+    data: { title: string; category?: string; categories?: string[] };
+  }[];
   family: string;
   canEdit: boolean;
   month: string;
@@ -277,15 +280,21 @@ export default function Planning({
         : "Изменения сохранены в семейной базе.",
     );
   }
-  const categoryOf = (r: Row) =>
-    String(
-      snapshot(r).category ??
-        recipes.find((p) => p.id === r.recipe_id)?.data.category ??
-        "Другие",
-    );
-  const matchesCategory = (r: Row) => !category || categoryOf(r) === category;
+  const categoriesOf = (r: Row): string[] => {
+    const saved = snapshot(r);
+    if (Array.isArray(saved.categories))
+      return saved.categories.filter((c): c is string => typeof c === "string");
+    if (typeof saved.category === "string") return [saved.category];
+    const recipe = recipes.find((p) => p.id === r.recipe_id);
+    return recipe?.data.categories ?? [recipe?.data.category ?? "Другие"];
+  };
+  const matchesCategory = (r: Row) =>
+    !category || categoriesOf(r).includes(category);
   const categoryOptions = [
-    ...new Set([...recipeCategories, ...[...menu, ...tasks].map(categoryOf)]),
+    ...new Set([
+      ...recipeCategories,
+      ...[...menu, ...tasks].flatMap(categoriesOf),
+    ]),
   ];
   const inCalendar =
     kind === "menu"

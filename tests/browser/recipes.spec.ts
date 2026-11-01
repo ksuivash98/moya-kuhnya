@@ -857,9 +857,13 @@ test("уточнение основной категории рецепта и �
       await page
         .getByRole("button", { name: "Редактировать", exact: true })
         .click();
-      await page
-        .getByLabel("Категория", { exact: true })
-        .selectOption(category);
+      await expect(page.locator(".recipe-category-field")).toBeVisible();
+      for (const choice of await page
+        .locator(".recipe-category-field")
+        .getByRole("checkbox")
+        .all())
+        await choice.uncheck();
+      await page.getByRole("checkbox", { name: category, exact: true }).check();
       await page
         .getByRole("button", { name: "Сохранить рецепт", exact: true })
         .click();
@@ -870,6 +874,9 @@ test("уточнение основной категории рецепта и �
       await page.getByRole("button", { name: category, exact: true }).click();
       await expect(page.locator(".recipe-card")).toHaveCount(1);
       await expect(page.locator(".recipe-card")).toContainText(category);
+      await page
+        .getByRole("button", { name: "Все рецепты", exact: true })
+        .click();
       await page.getByRole("button", { name: "Супы", exact: true }).click();
       await expect(page.locator(".recipe-card")).toHaveCount(0);
     }
@@ -883,8 +890,11 @@ test("уточнение основной категории рецепта и �
       .getByRole("button", { name: "Редактировать", exact: true })
       .click();
     await page
-      .getByLabel("Категория", { exact: true })
-      .selectOption("Рыбные блюда");
+      .getByRole("checkbox", { name: "Блюда с гарниром", exact: true })
+      .uncheck();
+    await page
+      .getByRole("checkbox", { name: "Рыбные блюда", exact: true })
+      .check();
     let migrationMissing = true;
     await page.route("**/rest/v1/rpc/save_recipe", async (route) => {
       if (migrationMissing)
@@ -905,9 +915,9 @@ test("уточнение основной категории рецепта и �
     await expect(
       page.getByText(/Для новых категорий рецептов примените миграцию 014/),
     ).toBeVisible();
-    await expect(page.getByLabel("Категория", { exact: true })).toHaveValue(
-      "Рыбные блюда",
-    );
+    await expect(
+      page.getByRole("checkbox", { name: "Рыбные блюда", exact: true }),
+    ).toBeChecked();
     await expect(
       page.getByLabel("Название рецепта *", { exact: true }),
     ).toHaveValue("Рецепт для уточнения категории");
@@ -918,6 +928,192 @@ test("уточнение основной категории рецепта и �
     await expect(
       page.getByRole("button", { name: "Редактировать", exact: true }),
     ).toBeVisible();
+  } finally {
+    await b.close();
+  }
+});
+
+test("несколько категорий: сохранение, фильтры любая/все, избранное и удаление метки", async ({
+  page,
+}, testInfo) => {
+  await page.addInitScript(() => localStorage.setItem("kitchen-theme", "dark"));
+  const b = await recipeBackend(page);
+  try {
+    const both = await b.save("Рыба с рисом");
+    for (const [title, categories] of [
+      ["Рыба без гарнира", ["Рыбные блюда"]],
+      ["Мясо с рисом", ["Мясные блюда", "Блюда с гарниром"]],
+    ] as const) {
+      const recipe = await b.save(title);
+      await b.query("select public.save_recipe_with_categories($1,$2,$3,$4)", [
+        recipe.id,
+        b.family,
+        { ...recipe.data, category: categories[0], categories },
+        1,
+      ]);
+    }
+    await page.goto(`/recipes?recipe=${both.id}`);
+    await page
+      .getByRole("button", { name: "Редактировать", exact: true })
+      .click();
+    await page
+      .getByRole("checkbox", { name: "Основные блюда", exact: true })
+      .uncheck();
+    await page
+      .getByRole("checkbox", { name: "Рыбные блюда", exact: true })
+      .check();
+    await page
+      .getByRole("checkbox", { name: "Блюда с гарниром", exact: true })
+      .check();
+    await page.locator(".recipe-category-field").screenshot({
+      path: testInfo.outputPath("multiple-recipe-categories.png"),
+    });
+    let missingMigration = true;
+    await page.route(
+      "**/rest/v1/rpc/save_recipe_with_categories",
+      async (route) => {
+        if (missingMigration)
+          await route.fulfill({
+            status: 404,
+            contentType: "application/json",
+            body: JSON.stringify({
+              code: "PGRST202",
+              message: "Could not find the function",
+            }),
+          });
+        else await route.fallback();
+      },
+    );
+    await page
+      .getByRole("button", { name: "Сохранить рецепт", exact: true })
+      .click();
+    await expect(
+      page.getByText(/Для нескольких категорий примените миграцию 015/),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("checkbox", { name: "Рыбные блюда", exact: true }),
+    ).toBeChecked();
+    await expect(
+      page.getByRole("checkbox", { name: "Блюда с гарниром", exact: true }),
+    ).toBeChecked();
+    missingMigration = false;
+    await page
+      .getByRole("button", { name: "Сохранить рецепт", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Редактировать", exact: true }),
+    ).toBeVisible();
+    await page.reload();
+    await expect(
+      page.locator(".recipe-detail .recipe-categories"),
+    ).toContainText("Рыбные блюда");
+    await expect(
+      page.locator(".recipe-detail .recipe-categories"),
+    ).toContainText("Блюда с гарниром");
+    await page.goto("/recipes");
+    const filters = page.getByRole("group", {
+      name: "Категории рецептов",
+      exact: true,
+    });
+    await filters
+      .getByRole("button", { name: "Рыбные блюда", exact: true })
+      .click();
+    await expect(page.locator(".recipe-card")).toHaveCount(2);
+    await filters
+      .getByRole("button", { name: "Блюда с гарниром", exact: true })
+      .click();
+    await expect(page.locator(".recipe-card")).toHaveCount(3);
+    await page
+      .getByRole("combobox", { name: "Совпадение категорий", exact: true })
+      .selectOption("all");
+    await expect(page.locator(".recipe-card")).toHaveCount(1);
+    await expect(page.locator(".recipe-card")).toContainText("Рыба с рисом");
+    await page
+      .getByRole("button", { name: "В избранное: Рыба с рисом", exact: true })
+      .click();
+    await filters
+      .getByRole("button", { name: "Избранное", exact: true })
+      .click();
+    await expect(page.locator(".recipe-card")).toHaveCount(1);
+    await page.getByLabel("Поиск рецептов", { exact: true }).fill("мясо");
+    await expect(page.locator(".recipe-card")).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "Сбросить фильтры", exact: true })
+      .click();
+    await expect(page.locator(".recipe-card")).toHaveCount(3);
+    await page
+      .getByLabel("Сортировка рецептов", { exact: true })
+      .selectOption("Название");
+    await page.getByRole("button", { name: "Строки", exact: true }).click();
+    for (const width of [320, 768, 1366]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+    }
+    const date = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Yekaterinburg",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+    for (const action of ["menu_save", "task_save"])
+      await b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        {
+          id: crypto.randomUUID(),
+          recipe_id: both.id,
+          date,
+          month: date.slice(0, 7) + "-01",
+          meal: "Ужин",
+          servings: 4,
+          planned_count: 1,
+          planned_preparations: 0,
+          status: "Запланировано",
+        },
+      ]);
+    await page.goto(`/recipes?recipe=${both.id}`);
+    await page
+      .getByRole("button", { name: "Редактировать", exact: true })
+      .click();
+    await expect(
+      page.getByRole("checkbox", { name: "Блюда с гарниром", exact: true }),
+    ).toBeChecked();
+    await page
+      .getByRole("checkbox", { name: "Блюда с гарниром", exact: true })
+      .uncheck();
+    await page
+      .getByRole("button", { name: "Сохранить рецепт", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Редактировать", exact: true }),
+    ).toBeVisible();
+    await page.reload();
+    await expect(
+      page.locator(".recipe-detail .recipe-categories"),
+    ).not.toContainText("Блюда с гарниром");
+    expect(
+      (
+        await b.query<{ categories: string[] }>(
+          "select categories from public.recipes where id=$1",
+          [both.id],
+        )
+      ).rows[0].categories,
+    ).toEqual(["Рыбные блюда"]);
+    for (const route of ["/menu", "/cooking"]) {
+      await page.goto(route);
+      await page
+        .getByRole("combobox", { name: "Категория", exact: true })
+        .selectOption("Блюда с гарниром");
+      await expect(page.locator("article.planning-item")).toHaveCount(1);
+      await expect(page.locator("article.planning-item")).toContainText(
+        "Рыба с рисом",
+      );
+    }
   } finally {
     await b.close();
   }

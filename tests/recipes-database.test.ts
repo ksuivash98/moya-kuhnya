@@ -116,6 +116,37 @@ beforeAll(async () => {
       { ...blankStep(), text: "Обжарить" },
     ],
   };
+  const beforeMigration = crypto.randomUUID();
+  await save(
+    {
+      ...data,
+      ingredients: data.ingredients.map((i) => ({
+        ...i,
+        id: crypto.randomUUID(),
+      })),
+      steps: data.steps.map((s) => ({ ...s, id: crypto.randomUUID() })),
+    },
+    null,
+    beforeMigration,
+  );
+  await db.exec("reset role");
+  await db.exec(
+    readFileSync(
+      "supabase/migrations/202611010015_recipe_multiple_categories.sql",
+      "utf8",
+    ),
+  );
+  await user(owner);
+  expect(
+    await scalar("select categories from public.recipes where id=$1", [
+      beforeMigration,
+    ]),
+  ).toEqual([data.category]);
+  expect(
+    await scalar("select version from public.recipes where id=$1", [
+      beforeMigration,
+    ]),
+  ).toBe(1);
 }, 30000);
 afterAll(async () => {
   await db?.close();
@@ -555,4 +586,80 @@ test("новые категории: сохранение, повторная м
       "insert into public.recipe_categories(name,position) values('Чужая категория',999)",
     ),
   ).rejects.toThrow();
+});
+
+test("несколько категорий: атомарное сохранение, старые клиенты, версии и права доступа", async () => {
+  await user(owner);
+  const rid = crypto.randomUUID();
+  const d = {
+    ...data,
+    category: "Мясные блюда",
+    categories: ["Мясные блюда", "Блюда с гарниром"],
+    freezeInstructions: "Заморозить порциями",
+    ingredients: data.ingredients.map((i) => ({
+      ...i,
+      id: crypto.randomUUID(),
+    })),
+    steps: data.steps.map((s) => ({ ...s, id: crypto.randomUUID() })),
+  };
+  const multi = (
+    payload: unknown,
+    version: number | null,
+    targetFamily = family,
+  ) =>
+    db.query("select public.save_recipe_with_categories($1,$2,$3,$4)", [
+      rid,
+      targetFamily,
+      payload,
+      version,
+    ]);
+  await multi(d, null);
+  const labels = () =>
+    scalar("select categories from public.recipes where id=$1", [rid]);
+  expect(await labels()).toEqual(d.categories);
+  expect(
+    await scalar("select freeze_instructions from public.recipes where id=$1", [
+      rid,
+    ]),
+  ).toBe(d.freezeInstructions);
+  const legacy = { ...d };
+  delete (legacy as Partial<RecipeData>).categories;
+  await save(legacy, 1, rid);
+  expect(await labels()).toEqual(d.categories);
+  await save({ ...legacy, category: "Рыбные блюда" }, 2, rid);
+  expect(await labels()).toEqual(["Рыбные блюда", "Блюда с гарниром"]);
+  await multi({ ...d, category: "Гарниры", categories: ["Гарниры"] }, 3);
+  expect(await labels()).toEqual(["Гарниры"]);
+  for (const categories of [
+    [],
+    ["Неизвестная"],
+    ["Супы", "Супы"],
+    [null],
+    "Супы",
+  ]) {
+    await expect(multi({ ...d, categories }, 4)).rejects.toThrow();
+    expect(await labels()).toEqual(["Гарниры"]);
+  }
+  await expect(multi(d, 3)).rejects.toThrow("изменён");
+  expect(
+    await scalar("select version from public.recipes where id=$1", [rid]),
+  ).toBe(4);
+  await expect(
+    db.query("update public.recipes set categories=array['Супы'] where id=$1", [
+      rid,
+    ]),
+  ).rejects.toThrow();
+  await expect(multi(d, 4, other)).rejects.toThrow("Нет права");
+  await user(child);
+  await expect(multi(d, 4)).rejects.toThrow("Нет права");
+  await user(stranger);
+  await expect(multi(d, 4)).rejects.toThrow("Нет права");
+  expect(
+    await scalar("select count(*)::int from public.recipes where id=$1", [rid]),
+  ).toBe(0);
+  await db.exec("reset role");
+  await db.exec("set role anon");
+  await expect(multi(d, 4)).rejects.toThrow("permission denied");
+  await user(owner);
+  expect(await labels()).toEqual(["Гарниры"]);
 });

@@ -39,6 +39,7 @@ export type RecipeData = {
   title: string;
   description: string;
   category: string;
+  categories?: string[];
   photo: string;
   prep: number;
   cook: number;
@@ -95,6 +96,12 @@ export const blankRecipe = (): RecipeData => ({
   source: "",
   favorite: false,
 });
+export function recipeCategories(data: {
+  category?: string;
+  categories?: string[];
+}): string[] {
+  return data.categories ?? (data.category ? [data.category] : []);
+}
 export function quantity(
   amount: string,
   unit: string,
@@ -126,8 +133,17 @@ export function validate(data: RecipeData): string | null {
     )
   )
     return "Время должно быть от 0 до 10080 минут.";
-  if (!categories.includes(data.category as (typeof categories)[number]))
-    return "Выберите категорию.";
+  const labels = recipeCategories(data);
+  if (
+    !labels.length ||
+    labels.length > categories.length ||
+    new Set(labels).size !== labels.length ||
+    labels.some(
+      (c) => !categories.includes(c as (typeof categories)[number]),
+    ) ||
+    data.category !== labels[0]
+  )
+    return "Выберите хотя бы одну категорию из списка без повторов.";
   if (!["Легко", "Средне", "Сложно"].includes(data.difficulty))
     return "Выберите сложность.";
   if (
@@ -160,17 +176,25 @@ export function validate(data: RecipeData): string | null {
 export function selectRecipes(
   recipes: Recipe[],
   query: string,
-  category: string,
+  category: string | string[],
   sort: string,
+  favoriteOnly = false,
+  match: "any" | "all" = "any",
 ) {
   const q = query.trim().toLocaleLowerCase("ru");
+  const selected = Array.isArray(category)
+    ? category
+    : ["Все рецепты", "Избранное"].includes(category)
+      ? []
+      : [category];
   return recipes
     .filter(
       (r) =>
-        (category === "Все рецепты" ||
-          (category === "Избранное"
-            ? r.data.favorite
-            : r.data.category === category)) &&
+        (!(favoriteOnly || category === "Избранное") || r.data.favorite) &&
+        (!selected.length ||
+          (match === "all"
+            ? selected.every((c) => recipeCategories(r.data).includes(c))
+            : selected.some((c) => recipeCategories(r.data).includes(c)))) &&
         (!q ||
           [r.data.title, ...r.data.ingredients.map((i) => i.name)].some((s) =>
             s.toLocaleLowerCase("ru").includes(q),

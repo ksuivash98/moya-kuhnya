@@ -13,6 +13,7 @@ type RawRecipe = {
   title: string;
   description: string;
   category: string;
+  categories?: string[];
   cover_path: string;
   prep_minutes: number;
   cook_minutes: number;
@@ -93,6 +94,7 @@ export async function loadRecipes(
       title: r.title,
       description: r.description,
       category: r.category,
+      categories: r.categories ?? [r.category],
       photo: r.cover_path,
       prep: r.prep_minutes,
       cook: r.cook_minutes,
@@ -225,8 +227,15 @@ export async function saveRecipe(
     const saveWithFreezing = Boolean(
       next.freezeInstructions || oldData?.freezeInstructions,
     );
+    const multipleCategories =
+      (next.categories?.length ?? 0) > 1 ||
+      (oldData?.categories?.length ?? 0) > 1;
     const { data: result, error } = await client().rpc(
-      saveWithFreezing ? "save_recipe_with_freezing" : "save_recipe",
+      multipleCategories
+        ? "save_recipe_with_categories"
+        : saveWithFreezing
+          ? "save_recipe_with_freezing"
+          : "save_recipe",
       {
         p_id: id,
         p_family: family,
@@ -234,6 +243,14 @@ export async function saveRecipe(
         p_version: version,
       },
     );
+    if (
+      multipleCategories &&
+      error &&
+      (error.code === "PGRST202" || error.code === "42883")
+    )
+      throw new Error(
+        "Для нескольких категорий примените миграцию 015 в Supabase. Рецепт не сохранён; изменения остаются в форме.",
+      );
     if (
       saveWithFreezing &&
       error &&

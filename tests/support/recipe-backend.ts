@@ -34,6 +34,7 @@ export async function recipeBackend(
     "202610310012_clear_shopping.sql",
     "202610310013_clear_planning.sql",
     "202611010014_recipe_categories.sql",
+    "202611010015_recipe_multiple_categories.sql",
   ])
     await db.exec(readFileSync(`supabase/migrations/${file}`, "utf8"));
   for (const id of [owner, child])
@@ -157,6 +158,12 @@ export async function recipeBackend(
             get_kitchen_state: ["p_family", "p_from", "p_to", "p_offset"],
             get_recipe_page: ["p_family", "p_offset"],
             save_recipe_with_freezing: [
+              "p_id",
+              "p_family",
+              "p_data",
+              "p_version",
+            ],
+            save_recipe_with_categories: [
               "p_id",
               "p_family",
               "p_data",

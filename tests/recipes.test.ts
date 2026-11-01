@@ -123,3 +123,58 @@ describe("Книга рецептов — расчёты и валидация",
     ).toEqual(["b", "a"]);
   });
 });
+
+test("несколько категорий: совпадение любой/всех, поиск, избранное и сортировка", () => {
+  const base: Recipe = {
+    id: "both",
+    family_id: "f",
+    created_at: "2026-11-01",
+    version: 1,
+    views: 1,
+    data: {
+      ...data(),
+      title: "Рыба с рисом",
+      category: "Рыбные блюда",
+      categories: ["Рыбные блюда", "Блюда с гарниром"],
+      favorite: true,
+    },
+  };
+  const fish = {
+    ...base,
+    id: "fish",
+    data: { ...data(), title: "Запечённая рыба", category: "Рыбные блюда" },
+  };
+  const meat = {
+    ...base,
+    id: "meat",
+    data: {
+      ...data(),
+      title: "Мясо с рисом",
+      category: "Мясные блюда",
+      categories: ["Мясные блюда", "Блюда с гарниром"],
+    },
+  };
+  const list = [base, fish, meat];
+  const selected = ["Рыбные блюда", "Блюда с гарниром"];
+  expect(
+    selectRecipes(list, "", selected, "Название").map((r) => r.id),
+  ).toEqual(["fish", "meat", "both"]);
+  expect(
+    selectRecipes(list, "", selected, "Название", false, "all").map(
+      (r) => r.id,
+    ),
+  ).toEqual(["both"]);
+  expect(
+    selectRecipes(list, "мясо", selected, "Название").map((r) => r.id),
+  ).toEqual(["meat"]);
+  expect(
+    selectRecipes(list, "", selected, "Название", true).map((r) => r.id),
+  ).toEqual(["both"]);
+  expect(validate(base.data)).toBeNull();
+  for (const categories of [
+    [],
+    ["Неизвестно"],
+    ["Рыбные блюда", "Рыбные блюда"],
+  ])
+    expect(validate({ ...base.data, categories })).toBeTruthy();
+});

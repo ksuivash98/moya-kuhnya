@@ -44,6 +44,7 @@ beforeAll(async () => {
     "202610310012_clear_shopping.sql",
     "202610310013_clear_planning.sql",
     "202611010014_recipe_categories.sql",
+    "202611010015_recipe_multiple_categories.sql",
   ]) {
     if (file === "202610310011_shopping_categories.sql")
       await db.exec(`
