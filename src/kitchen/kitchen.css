@@ -362,3 +362,90 @@ details .checkbox-label {
   gap: 12px;
   margin-top: 20px;
 }
+
+/* Shared content groups retain the card typography in both layouts. */
+.inventory-item-storage p,
+.planning-item-summary p {
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--muted);
+}
+.inventory-item-storage .k-danger {
+  color: var(--destructive, #af645c);
+}
+.k-day {
+  display: flex;
+  flex-direction: column;
+  height: clamp(160px, 24vh, 210px);
+  overflow: hidden;
+}
+.k-day > header {
+  flex-shrink: 0;
+  align-items: center;
+}
+.k-day-items {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+  padding-right: 3px;
+}
+.k-day-items:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: -2px;
+}
+.k-day .k-item:first-child {
+  margin-top: 0;
+}
+.k-day .planning-item-summary p {
+  margin: 6px 0;
+}
+.k-day .planning-item-tools button {
+  padding: 7px 2px;
+  width: 100%;
+  white-space: nowrap;
+  min-height: 36px;
+  font-size: 11px;
+  max-width: 100%;
+}
+.planning-actions-dialog .k-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+.planning-actions-dialog .k-actions > :is(button, a) {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--pale);
+  text-decoration: none;
+  color: var(--text);
+}
+.planning-actions-dialog .k-actions > :is(button, a):hover {
+  background: var(--surface);
+}
+@media (min-width: 721px) {
+  .k-calendar.one-day .k-day {
+    height: min(520px, 65vh);
+  }
+}
+@media (max-width: 720px) {
+  .k-day {
+    height: auto;
+    min-height: 72px;
+    max-height: 320px;
+  }
+  .k-day-items {
+    max-height: 240px;
+  }
+  .k-day .planning-item-summary p {
+    font-size: 12px;
+  }
+  .k-day .planning-item-tools button {
+    min-height: 40px;
+    font-size: 12px;
+  }
+}

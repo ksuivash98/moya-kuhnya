@@ -455,27 +455,31 @@ export default function Inventory({
                 />
               </div>
             )}
-            <span className="pill quiet">
-              {prep ? str(r, "category") : str(product(r), "category")}
-            </span>
-            <h3>{prep ? str(r, "title") : str(product(r), "name")}</h3>
-            <strong>
+            <div className="inventory-item-title">
+              <span className="pill quiet">
+                {prep ? str(r, "category") : str(product(r), "category")}
+              </span>
+              <h3>{prep ? str(r, "title") : str(product(r), "name")}</h3>
+            </div>
+            <strong className="inventory-item-quantity">
               {!prep && "В наличии: "}
               {fmt(num(r, "quantity"))} {str(r, "unit")}
             </strong>
-            <p>
-              {str(
-                places.find((p) => p.id === r.place_id),
-                "name",
-              ) || "Место не указано"}{" "}
-              · {prep ? "до" : "Годен до:"}{" "}
-              {str(r, "expires_on") || "не указано"}
-            </p>
-            {r.expires_on && str(r, "expires_on") < today() && (
-              <p className="k-danger">Срок годности истёк</p>
-            )}
+            <div className="inventory-item-storage">
+              <p>
+                {str(
+                  places.find((p) => p.id === r.place_id),
+                  "name",
+                ) || "Место не указано"}{" "}
+                · {prep ? "до" : "Годен до:"}{" "}
+                {str(r, "expires_on") || "не указано"}
+              </p>
+              {r.expires_on && str(r, "expires_on") < today() && (
+                <p className="k-danger">Срок годности истёк</p>
+              )}
+            </div>
             {canEdit && (
-              <div className="k-actions">
+              <div className="k-actions inventory-item-actions">
                 <button
                   onClick={() =>
                     setDialog({

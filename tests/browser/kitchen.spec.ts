@@ -67,6 +67,10 @@ test("единая кухня: меню → покупка → запасы → 
     await page.goto("/menu");
     await page
       .locator(".k-calendar")
+      .getByRole("button", { name: /^Действия:/ })
+      .click();
+    await page
+      .getByRole("dialog")
       .getByRole("button", { name: "В план готовки", exact: true })
       .click();
     await page
@@ -363,6 +367,10 @@ test("офлайн-конфликт сохраняет локальную пра
     await page.goto("/menu");
     await page
       .locator(".k-calendar")
+      .getByRole("button", { name: /^Действия:/ })
+      .click();
+    await page
+      .getByRole("dialog")
       .getByRole("button", { name: "Изменить", exact: true })
       .click();
     await context.setOffline(true);
@@ -1145,3 +1153,208 @@ for (const kind of ["menu", "cooking"])
       await b.close();
     }
   });
+
+test("календарь с множеством блюд: ограниченная высота и доступные действия", async ({
+  page,
+}, testInfo) => {
+  const b = await recipeBackend(page);
+  try {
+    const recipe = await b.save("Блюдо для компактного календаря");
+    for (let i = 0; i < 8; i++) {
+      await b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        "menu_save",
+        {
+          id: crypto.randomUUID(),
+          recipe_id: recipe.id,
+          date: day(),
+          month: day().slice(0, 7) + "-01",
+          meal: "Ужин",
+          servings: 4,
+          planned_count: 1,
+          status: "Запланировано",
+        },
+      ]);
+    }
+    for (const theme of ["light", "dark"]) {
+      await page.goto("/menu");
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      if ((await page.locator("html").getAttribute("data-theme")) !== theme) {
+        await page
+          .getByRole("button", {
+            name:
+              theme === "dark"
+                ? "Включить тёмную тему"
+                : "Включить светлую тему",
+            exact: true,
+          })
+          .click();
+      }
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      await page.getByRole("button", { name: "Неделя", exact: true }).click();
+      const today = page.locator(".k-day.is-today");
+      const contents = today.locator(".k-day-items");
+      await expect(today.locator("article")).toHaveCount(8);
+      const bounds = await today.boundingBox();
+      expect(bounds!.height).toBeLessThanOrEqual(320);
+      expect(
+        await contents.evaluate((el) => el.scrollHeight > el.clientHeight),
+      ).toBe(true);
+      await contents.focus();
+      const dateTop = (await today.locator("header").boundingBox())!.y;
+      await contents.press("End");
+      await expect
+        .poll(() => contents.evaluate((el) => el.scrollTop))
+        .toBeGreaterThan(0);
+      expect((await today.locator("header").boundingBox())!.y).toBeCloseTo(
+        dateTop,
+        0,
+      );
+      const trigger = contents
+        .getByRole("button", { name: /^Действия:/ })
+        .last();
+      await trigger.click();
+      const actions = page.getByRole("dialog", {
+        name: "Действия с блюдом",
+        exact: true,
+      });
+      await expect(
+        actions.getByRole("button", {
+          name: "Подтвердить готовку",
+          exact: true,
+        }),
+      ).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(trigger).toBeFocused();
+      await trigger.click();
+      await actions
+        .getByRole("button", { name: "Изменить", exact: true })
+        .click();
+      await expect(
+        page
+          .getByRole("dialog")
+          .getByLabel("Количество порций", { exact: true }),
+      ).toHaveValue("4");
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Закрыть", exact: true })
+        .click();
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      await contents.evaluate((el) => {
+        el.scrollTop = 0;
+      });
+      await page.locator(".k-calendar").screenshot({
+        path: testInfo.outputPath(`compact-calendar-${theme}.png`),
+      });
+    }
+    expect(
+      (
+        await b.query(
+          "select id from public.menu_items where status='Запланировано'",
+        )
+      ).rows,
+    ).toHaveLength(8);
+  } finally {
+    await b.close();
+  }
+});
+
+test("строки запасов: горизонтальные колонки на компьютере и перенос на телефоне", async ({
+  page,
+}, testInfo) => {
+  const b = await recipeBackend(page);
+  try {
+    const product = crypto.randomUUID();
+    const place = (
+      await b.query<{ id: string }>(
+        "select id from public.storage_places limit 1",
+      )
+    ).rows[0].id;
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    await mutate("product_save", {
+      id: product,
+      name: "Чёрный молотый перец",
+      category: "Специи",
+      unit: "г",
+      minimum: 0,
+      archived: false,
+    });
+    await mutate("batch_save", {
+      id: crypto.randomUUID(),
+      product_id: product,
+      quantity: 22,
+      unit: "г",
+      purchased_on: day(),
+      place_id: place,
+      reason: "Ручное добавление",
+    });
+    await page.goto("/products");
+    await page.getByRole("button", { name: "Строки", exact: true }).click();
+    const row = page.locator("article.inventory-item");
+    for (const theme of ["light", "dark"]) {
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      if ((await page.locator("html").getAttribute("data-theme")) !== theme) {
+        await page
+          .getByRole("button", {
+            name:
+              theme === "dark"
+                ? "Включить тёмную тему"
+                : "Включить светлую тему",
+            exact: true,
+          })
+          .click();
+      }
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      for (const width of [1440, 1024, 768, 390, 320]) {
+        await page.setViewportSize({ width, height: 900 });
+        await expect(row).toBeVisible();
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth <= innerWidth,
+          ),
+          `${theme}: ${width}px`,
+        ).toBe(true);
+        if (width === 1440) {
+          const bounds = await row.boundingBox();
+          expect(bounds!.height).toBeLessThanOrEqual(130);
+          const positions = await row.evaluate((el) =>
+            ["title", "quantity", "storage", "actions"].map(
+              (name) =>
+                el
+                  .querySelector(`.inventory-item-${name}`)!
+                  .getBoundingClientRect().x,
+            ),
+          );
+          expect(positions).toEqual([...positions].sort((a, b) => a - b));
+          expect(new Set(positions).size).toBe(4);
+        }
+        await expect(
+          row.getByRole("button", { name: "Изменить запас", exact: true }),
+        ).toBeVisible();
+        if ([1440, 390].includes(width))
+          await page.screenshot({
+            path: testInfo.outputPath(`compact-rows-${theme}-${width}.png`),
+          });
+      }
+    }
+    await row
+      .getByRole("button", { name: "Изменить запас", exact: true })
+      .click();
+    await expect(
+      page.getByRole("dialog").getByLabel("Сколько осталось", { exact: true }),
+    ).toHaveValue("22");
+  } finally {
+    await b.close();
+  }
+});

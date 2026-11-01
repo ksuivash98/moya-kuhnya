@@ -1,6 +1,6 @@
 import LayoutToggle, { useListLayout } from "../components/ListLayout";
 import { categories as recipeCategories } from "../recipes/model";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { NavLink, useSearchParams } from "react-router-dom";
 import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import Fields, { type Field } from "./Fields";
@@ -47,6 +47,12 @@ export default function Planning({
   const [params] = useSearchParams();
   const [layout, setLayout] = useListLayout(kind);
   const [category, setCategory] = useState("");
+  const [actionRow, setActionRow] = useState<Row | null>(null);
+  const actionTrigger = useRef<HTMLButtonElement | null>(null);
+  const closeActions = () => {
+    setActionRow(null);
+    requestAnimationFrame(() => actionTrigger.current?.focus());
+  };
   const [showCancelled, setShowCancelled] = useState(false);
   const [clearRequest, setClearRequest] = useState<{
     action: string;
@@ -281,6 +287,84 @@ export default function Planning({
   const categoryOptions = [
     ...new Set([...recipeCategories, ...[...menu, ...tasks].map(categoryOf)]),
   ];
+  const inCalendar =
+    kind === "menu"
+      ? !["Список", "Список без дат"].includes(mode)
+      : ["Неделя", "День"].includes(mode);
+  function actionButtons(r: Row) {
+    const completed = [
+      "Приготовлено",
+      "Сделана заготовка",
+      "Приготовлено из заготовки",
+    ].includes(str(r, "status"));
+    const showDialog: typeof setDialog = (request) => {
+      setActionRow(null);
+      setDialog(request);
+    };
+    return (
+      <div className="k-actions">
+        <NavLink
+          to={`/recipes?recipe=${r.recipe_id}`}
+          onClick={() => setActionRow(null)}
+        >
+          Рецепт ↗
+        </NavLink>
+        {canEdit && (
+          <>
+            <button
+              onClick={() =>
+                showDialog({
+                  action: kind === "menu" ? "menu_save" : "task_save",
+                  row: r,
+                })
+              }
+              disabled={completed}
+            >
+              Изменить
+            </button>
+            {kind === "menu" && (
+              <>
+                <button
+                  onClick={() => showDialog({ action: "menu_repeat", row: r })}
+                >
+                  Повторить
+                </button>
+                <button
+                  disabled={completed}
+                  onClick={() =>
+                    showDialog({
+                      action: "task_save",
+                      row: {
+                        ...r,
+                        id: crypto.randomUUID(),
+                        version: 0,
+                        menu_id: r.id,
+                        date: r.date || today(),
+                        status: "Запланировано",
+                        planned_preparations: 0,
+                        checked_steps: [],
+                      },
+                    })
+                  }
+                >
+                  В план готовки
+                </button>
+              </>
+            )}
+            <button
+              disabled={completed || r.status === "Отменено"}
+              onClick={() => {
+                setActionRow(null);
+                setCooking(r);
+              }}
+            >
+              Подтвердить готовку
+            </button>
+          </>
+        )}
+      </div>
+    );
+  }
   function card(r: Row) {
     const completed = [
       "Приготовлено",
@@ -288,71 +372,45 @@ export default function Planning({
       "Приготовлено из заготовки",
     ].includes(str(r, "status"));
     return (
-      <article className="k-item" key={r.id}>
-        <span className="pill quiet">{str(r, "meal") || str(r, "date")}</span>
-        <h3>{str(r, "title")}</h3>
-        <p>
-          {fmt(num(r, "servings"))} порц. · {str(r, "status")}
-          {r.planned_count ? ` · ${num(r, "planned_count")} приготовл.` : ""}
-        </p>
-        {r.planned_preparations && num(r, "planned_preparations") > 0 ? (
-          <small>Заготовки: {fmt(num(r, "planned_preparations"))} порц.</small>
-        ) : null}
-        <div className="k-actions">
-          <NavLink to={`/recipes?recipe=${r.recipe_id}`}>Рецепт ↗</NavLink>
-          {canEdit && (
-            <>
-              <button
-                onClick={() =>
-                  setDialog({
-                    action: kind === "menu" ? "menu_save" : "task_save",
-                    row: r,
-                  })
-                }
-                disabled={completed}
-              >
-                Изменить
-              </button>
-              {kind === "menu" && (
-                <>
-                  <button
-                    onClick={() => setDialog({ action: "menu_repeat", row: r })}
-                  >
-                    Повторить
-                  </button>
-                  <button
-                    disabled={completed}
-                    onClick={() =>
-                      setDialog({
-                        action: "task_save",
-                        row: {
-                          ...r,
-                          id: crypto.randomUUID(),
-                          version: 0,
-                          menu_id: r.id,
-                          date: r.date || today(),
-                          status: "Запланировано",
-                          planned_preparations: 0,
-                          checked_steps: [],
-                        },
-                      })
-                    }
-                  >
-                    В план готовки
-                  </button>
-                </>
-              )}
-              <button
-                disabled={completed || r.status === "Отменено"}
-                onClick={() => setCooking(r)}
-              >
-                Подтвердить готовку
-              </button>
-            </>
-          )}
+      <article className="k-item planning-item" key={r.id}>
+        <div className="planning-item-title">
+          <span className="pill quiet">{str(r, "meal") || str(r, "date")}</span>
+          <h3>{str(r, "title")}</h3>
         </div>
+        <div className="planning-item-summary">
+          <p>
+            {fmt(num(r, "servings"))} порц. · {str(r, "status")}
+            {r.planned_count ? ` · ${num(r, "planned_count")} приготовл.` : ""}
+          </p>
+          {r.planned_preparations && num(r, "planned_preparations") > 0 ? (
+            <small>
+              Заготовки: {fmt(num(r, "planned_preparations"))} порц.
+            </small>
+          ) : null}
+        </div>
+        {inCalendar || layout === "list" ? (
+          <div className="planning-item-tools">
+            {canEdit ? (
+              <button
+                type="button"
+                className="secondary"
+                aria-label={`Действия: ${str(r, "title")}`}
+                onClick={(e) => {
+                  actionTrigger.current = e.currentTarget;
+                  setActionRow(r);
+                }}
+              >
+                Действия
+              </button>
+            ) : (
+              <NavLink to={`/recipes?recipe=${r.recipe_id}`}>Рецепт ↗</NavLink>
+            )}
+          </div>
+        ) : (
+          actionButtons(r)
+        )}
         {kind === "cooking" && (
-          <details>
+          <details className="planning-item-steps">
             <summary>Шаги приготовления</summary>
             {((snapshot(r).steps ?? []) as Record<string, Json>[]).map((s) => (
               <label className="checkbox-label" key={String(s.id)}>
@@ -550,39 +608,49 @@ export default function Planning({
         </div>
       ) : (
         <div className={`k-calendar ${mode === "День" ? "one-day" : ""}`}>
-          {days.map((day) => (
-            <section
-              key={day}
-              className={`k-day ${day.startsWith(month) ? "" : "outside"} ${day === today() ? "is-today" : ""}`}
-            >
-              <header>
-                <strong>
-                  {new Intl.DateTimeFormat("ru-RU", {
-                    day: "numeric",
-                    month: "short",
-                    weekday: "short",
-                    timeZone: "UTC",
-                  }).format(new Date(day + "T12:00:00Z"))}
-                </strong>
-                {canEdit && (
-                  <button
-                    aria-label={`Добавить блюдо ${day}`}
-                    onClick={() =>
-                      setDialog({
-                        action: kind === "menu" ? "menu_save" : "task_save",
-                        day,
-                      })
-                    }
-                  >
-                    <Plus size={16} />
-                  </button>
-                )}
-              </header>
-              {active
-                .filter((r) => r.date === day && matchesCategory(r))
-                .map(card)}
-            </section>
-          ))}
+          {days.map((day) => {
+            const dayRows = active.filter(
+              (r) => r.date === day && matchesCategory(r),
+            );
+            return (
+              <section
+                key={day}
+                className={`k-day ${day.startsWith(month) ? "" : "outside"} ${day === today() ? "is-today" : ""}`}
+              >
+                <header>
+                  <strong>
+                    {new Intl.DateTimeFormat("ru-RU", {
+                      day: "numeric",
+                      month: "short",
+                      weekday: "short",
+                      timeZone: "UTC",
+                    }).format(new Date(day + "T12:00:00Z"))}
+                  </strong>
+                  {canEdit && (
+                    <button
+                      aria-label={`Добавить блюдо ${day}`}
+                      onClick={() =>
+                        setDialog({
+                          action: kind === "menu" ? "menu_save" : "task_save",
+                          day,
+                        })
+                      }
+                    >
+                      <Plus size={16} />
+                    </button>
+                  )}
+                </header>
+                <div
+                  className="k-day-items"
+                  tabIndex={dayRows.length ? 0 : undefined}
+                  role={dayRows.length ? "region" : undefined}
+                  aria-label={dayRows.length ? `Блюда ${day}` : undefined}
+                >
+                  {dayRows.map(card)}
+                </div>
+              </section>
+            );
+          })}
         </div>
       )}
       <section className="panel k-section">
@@ -651,6 +719,16 @@ export default function Planning({
             </details>
           ))}
       </section>
+      {actionRow && (
+        <Modal
+          title="Действия с блюдом"
+          className="planning-actions-dialog"
+          onClose={closeActions}
+        >
+          <p className="muted">{str(actionRow, "title")}</p>
+          {actionButtons(actionRow)}
+        </Modal>
+      )}
       {clearRequest && (
         <Modal
           title={

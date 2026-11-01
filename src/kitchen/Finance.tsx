@@ -392,22 +392,24 @@ export default function Finance({
       )}
       <div className={`k-list list-layout list-layout--${layout}`}>
         {list.slice(page * 20, (page + 1) * 20).map((r) => (
-          <article className="k-item" key={r.id}>
-            <span className="pill quiet">{str(r, "category")}</span>
-            <h3>
-              {shopping
-                ? str(
-                    products.find((p) => p.id === r.product_id),
-                    "name",
-                  )
-                : str(r, "title")}
-            </h3>
-            <strong>
+          <article className="k-item finance-item" key={r.id}>
+            <div className="finance-item-title">
+              <span className="pill quiet">{str(r, "category")}</span>
+              <h3>
+                {shopping
+                  ? str(
+                      products.find((p) => p.id === r.product_id),
+                      "name",
+                    )
+                  : str(r, "title")}
+              </h3>
+            </div>
+            <strong className="finance-item-quantity">
               {shopping
                 ? `${fmt(num(r, "quantity"))} ${str(r, "unit")}`
                 : rub(num(r, "amount"))}
             </strong>
-            <div className="k-actions">
+            <div className="k-actions finance-item-actions">
               {canEdit && (
                 <>
                   {shopping && (
@@ -461,7 +463,7 @@ export default function Finance({
             {rows(state, "purchases")
               .filter((p) => str(p, "date").startsWith(month))
               .map((p) => (
-                <div key={p.id} className="k-item">
+                <div key={p.id} className="k-item finance-history-item">
                   <strong>
                     {str(
                       rows(state, "expenses").find(
