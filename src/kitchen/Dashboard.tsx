@@ -1,3 +1,4 @@
+import LayoutToggle, { useListLayout } from "../components/ListLayout";
 import "./kitchen.css";
 import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
@@ -12,6 +13,7 @@ export default function Dashboard({
   user: string;
   onChange?: (s: State) => void;
 }) {
+  const [layout, setLayout] = useListLayout("dashboard");
   const [state, setState] = useState<State>();
   useEffect(() => {
     let alive = true;
@@ -51,7 +53,10 @@ export default function Dashboard({
       aria-label="Сегодня в семье"
     >
       <h2>Сегодня в семье</h2>
-      <div className="k-metrics">
+      <div className="list-options">
+        <LayoutToggle value={layout} onChange={setLayout} />
+      </div>
+      <div className={`k-metrics list-layout list-layout--${layout}`}>
         <NavLink to="/menu" className="k-item">
           <span>Блюд на сегодня</span>
           <strong>{menus.length}</strong>

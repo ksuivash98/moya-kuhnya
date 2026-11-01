@@ -1,3 +1,4 @@
+import LayoutToggle, { useListLayout } from "../components/ListLayout";
 import "./recipes.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -7,10 +8,8 @@ import {
   Clock,
   FileText,
   Film,
-  Grid2X2,
   Heart,
   Link,
-  List,
   PenLine,
   Plus,
   Search,
@@ -43,13 +42,13 @@ export default function RecipesPage({
 }) {
   const [params, setParams] = useSearchParams();
   const [page, setPage] = useState(0);
+  const [layout, setLayout] = useListLayout("recipes");
   const [recipes, setRecipes] = useState<Recipe[]>([]),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [query, setQuery] = useState(""),
     [category, setCategory] = useState("Все рецепты"),
     [sort, setSort] = useState("Дата добавления"),
-    [layout, setLayout] = useState("grid"),
     [chooser, setChooser] = useState(false),
     [importMode, setImportMode] = useState(""),
     [busy, setBusy] = useState(false),
@@ -314,24 +313,7 @@ export default function RecipesPage({
                 </option>
               </select>
             </label>
-            <div className="view-toggle">
-              <button
-                className={layout === "grid" ? "selected" : ""}
-                aria-label="Карточки"
-                aria-pressed={layout === "grid"}
-                onClick={() => setLayout("grid")}
-              >
-                <Grid2X2 size={18} />
-              </button>
-              <button
-                className={layout === "list" ? "selected" : ""}
-                aria-label="Компактный список"
-                aria-pressed={layout === "list"}
-                onClick={() => setLayout("list")}
-              >
-                <List size={18} />
-              </button>
-            </div>
+            <LayoutToggle value={layout} onChange={setLayout} />
           </div>
           <div
             className="recipe-filters"

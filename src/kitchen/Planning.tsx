@@ -1,3 +1,5 @@
+import LayoutToggle, { useListLayout } from "../components/ListLayout";
+import { categories as recipeCategories } from "../recipes/model";
 import { useState, useEffect } from "react";
 import { NavLink, useSearchParams } from "react-router-dom";
 import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
@@ -35,7 +37,7 @@ export default function Planning({
 }: {
   kind: string;
   state: State;
-  recipes: { id: string; data: { title: string } }[];
+  recipes: { id: string; data: { title: string; category?: string } }[];
   family: string;
   canEdit: boolean;
   month: string;
@@ -43,6 +45,8 @@ export default function Planning({
   notify: (s: string) => void;
 }) {
   const [params] = useSearchParams();
+  const [layout, setLayout] = useListLayout(kind);
+  const [category, setCategory] = useState("");
   const [showCancelled, setShowCancelled] = useState(false);
   const [clearRequest, setClearRequest] = useState<{
     action: string;
@@ -111,6 +115,20 @@ export default function Planning({
     ),
     [cooking, setCooking] = useState<Row | null>(null),
     [confirmBusy, setConfirmBusy] = useState(false);
+  useEffect(() => {
+    setCategory("");
+    try {
+      setMode(
+        localStorage.getItem(`kitchen-layout:${kind}`)
+          ? "Список"
+          : kind === "menu"
+            ? "Месяц"
+            : "Список",
+      );
+    } catch {
+      setMode(kind === "menu" ? "Месяц" : "Список");
+    }
+  }, [kind]);
   const range = monthRange(month);
   const menu = rows(state, "menu_items").filter(
     (r) =>
@@ -253,6 +271,16 @@ export default function Planning({
         : "Изменения сохранены в семейной базе.",
     );
   }
+  const categoryOf = (r: Row) =>
+    String(
+      snapshot(r).category ??
+        recipes.find((p) => p.id === r.recipe_id)?.data.category ??
+        "Другие",
+    );
+  const matchesCategory = (r: Row) => !category || categoryOf(r) === category;
+  const categoryOptions = [
+    ...new Set([...recipeCategories, ...[...menu, ...tasks].map(categoryOf)]),
+  ];
   function card(r: Row) {
     const completed = [
       "Приготовлено",
@@ -384,7 +412,7 @@ export default function Planning({
       <div className="k-toolbar">
         <div className="recipe-filters">
           {(kind === "menu"
-            ? ["Месяц", "Неделя", "День", "Список без дат"]
+            ? ["Месяц", "Неделя", "День", "Список", "Список без дат"]
             : ["Список", "Неделя", "День"]
           ).map((m) => (
             <button
@@ -396,6 +424,29 @@ export default function Planning({
             </button>
           ))}
         </div>
+        <select
+          aria-label="Категория"
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+        >
+          <option value="">Все категории</option>
+          {categoryOptions.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+        <LayoutToggle
+          value={layout}
+          active={
+            ["Список", "Список без дат"].includes(mode) ||
+            (kind === "cooking" && !["Неделя", "День"].includes(mode))
+          }
+          onChange={(v) => {
+            setLayout(v);
+            setMode("Список");
+          }}
+        />
         {canEdit && (
           <button
             className="primary"
@@ -437,6 +488,11 @@ export default function Planning({
           Показывать отменённые
         </label>
       </div>
+      <p className="help-text">
+        Категория меняет только карточки. Ингредиенты и очистка относятся ко
+        всему месяцу. Плитка и строки показывают список за месяц; календарные
+        режимы доступны отдельно.
+      </p>
       {!recipes.length && (
         <p className="notice">
           Сначала сохраните хотя бы один рецепт в семейной книге.
@@ -471,21 +527,24 @@ export default function Planning({
         </div>
       )}
       {mode === "Список без дат" ? (
-        <div className="k-list">
-          {menu.filter((r) => !r.date).map(card)}
-          {!menu.some((r) => !r.date) && (
+        <div className={`k-list list-layout list-layout--${layout}`}>
+          {menu.filter((r) => !r.date && matchesCategory(r)).map(card)}
+          {!menu.some((r) => !r.date && matchesCategory(r)) && (
             <div className="panel">
               Добавьте блюда без даты, чтобы распределить их по календарю позже.
               При назначении даты изменяется та же запись.
             </div>
           )}
         </div>
-      ) : kind === "cooking" && !["Неделя", "День"].includes(mode) ? (
-        <div className="k-list">
-          {tasks.map(card)}
-          {!tasks.length && (
+      ) : mode === "Список" ||
+        (kind === "cooking" && !["Неделя", "День"].includes(mode)) ? (
+        <div className={`k-list list-layout list-layout--${layout}`}>
+          {(kind === "menu" ? menu : tasks).filter(matchesCategory).map(card)}
+          {!(kind === "menu" ? menu : tasks).some(matchesCategory) && (
             <div className="panel">
-              План пока пуст. Добавьте блюда на нужные дни.
+              {category
+                ? "В этой категории записей нет. Выберите другую или все категории."
+                : "План пока пуст. Добавьте блюда на нужные дни."}
             </div>
           )}
         </div>
@@ -519,7 +578,9 @@ export default function Planning({
                   </button>
                 )}
               </header>
-              {active.filter((r) => r.date === day).map(card)}
+              {active
+                .filter((r) => r.date === day && matchesCategory(r))
+                .map(card)}
             </section>
           ))}
         </div>

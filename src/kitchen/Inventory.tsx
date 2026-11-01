@@ -1,3 +1,4 @@
+import LayoutToggle, { useListLayout } from "../components/ListLayout";
 import { client, check } from "../supabase";
 import { NavLink, useSearchParams } from "react-router-dom";
 import { useState, useEffect, useCallback } from "react";
@@ -27,6 +28,14 @@ export default function Inventory({
   notify,
 }: ModuleProps & { kind: string }) {
   const [params] = useSearchParams();
+  const [layout, setLayout] = useListLayout(kind);
+  const [category, setCategory] = useState("");
+  useEffect(() => {
+    setCategory("");
+    setFilter("");
+    setQuery("");
+    setPage(0);
+  }, [kind]);
   const [photoBlob, setPhotoBlob] = useState<Blob | null | undefined>();
   const [photoPath, setPhotoPath] = useState("");
   const [photoBusy, setPhotoBusy] = useState(0);
@@ -284,13 +293,23 @@ export default function Inventory({
     ? rows(state, "preparations")
     : rows(state, "stock_batches");
   const product = (r: Row) => products.find((p) => p.id === r.product_id);
+  const categoryOf = (r: Row) =>
+    (prep ? str(r, "category") : str(product(r), "category")) ||
+    (prep ? "Другие" : "Другое");
+  const categories = [
+    ...new Set([
+      ...(prep ? prepCategories : productCategories),
+      ...source.map(categoryOf),
+    ]),
+  ];
   const visible = source.filter(
     (r) =>
       num(r, "quantity") > 0 &&
-      `${prep ? str(r, "title") : str(product(r), "name")} ${str(product(r), "category")}`
+      `${prep ? str(r, "title") : str(product(r), "name")} ${categoryOf(r)}`
         .toLocaleLowerCase("ru")
         .includes(query.toLocaleLowerCase("ru")) &&
-      (!filter || r.place_id === filter),
+      (!filter || r.place_id === filter) &&
+      (!category || categoryOf(r) === category),
   );
   useEffect(() => {
     if (prep && canEdit && params.get("recipe")) {
@@ -367,6 +386,22 @@ export default function Inventory({
             </option>
           ))}
         </select>
+        <select
+          aria-label="Категория"
+          value={category}
+          onChange={(e) => {
+            setCategory(e.target.value);
+            setPage(0);
+          }}
+        >
+          <option value="">Все категории</option>
+          {categories.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+        <LayoutToggle value={layout} onChange={setLayout} />
         {canEdit && (
           <>
             <button
@@ -398,22 +433,27 @@ export default function Inventory({
       </div>
       {!visible.length && (
         <div className="panel k-empty">
-          {prep
-            ? "Заготовок пока нет. Их можно добавить вручную или получить при подтверждении готовки."
-            : query || filter
-              ? "По этим условиям запасов нет. Измените поиск или место хранения."
+          {query || filter || category
+            ? "По этим условиям запасов нет. Измените поиск, категорию или место хранения."
+            : prep
+              ? "Заготовок пока нет. Их можно добавить вручную или получить при подтверждении готовки."
               : "Запасов пока нет. Нажмите «Создать продукт», если названия ещё нет в списке, затем «Добавить запас» и укажите количество."}
         </div>
       )}
-      <div className="k-list">
+      <div className={`k-list list-layout list-layout--${layout}`}>
         {visible.slice(page * perPage, (page + 1) * perPage).map((r) => (
-          <article className="k-item" key={r.id}>
+          <article
+            className={`k-item inventory-item ${prep ? "inventory-item--photo" : ""}`}
+            key={r.id}
+          >
             {prep && (
-              <Photo
-                path={str(r, "photo_path")}
-                alt={str(r, "title")}
-                zoomable
-              />
+              <div className="inventory-item-photo">
+                <Photo
+                  path={str(r, "photo_path")}
+                  alt={str(r, "title")}
+                  zoomable
+                />
+              </div>
             )}
             <span className="pill quiet">
               {prep ? str(r, "category") : str(product(r), "category")}

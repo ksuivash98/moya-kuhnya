@@ -1,7 +1,9 @@
+import LayoutToggle, { useListLayout } from "../components/ListLayout";
 import { useState } from "react";
 import type { ModuleProps } from "./KitchenPage";
 import { rows, num, str, rub, fmt, monthRange } from "./model";
 export default function Analytics({ state, month }: ModuleProps) {
+  const [layout, setLayout] = useListLayout("analytics");
   const [unit, setUnit] = useState("г");
   const range = monthRange(month),
     events = rows(state, "cooking_events").filter((e) =>
@@ -54,7 +56,10 @@ export default function Analytics({ state, month }: ModuleProps) {
   }
   return (
     <>
-      <div className="k-metrics">
+      <div className="list-options">
+        <LayoutToggle value={layout} onChange={setLayout} />
+      </div>
+      <div className={`k-metrics list-layout list-layout--${layout}`}>
         {[
           { name: "Приготовлений", value: events.length },
           {
@@ -76,7 +81,7 @@ export default function Analytics({ state, month }: ModuleProps) {
           </div>
         ))}
       </div>
-      <div className="k-list">
+      <div className={`k-list list-layout list-layout--${layout}`}>
         <section className="panel">
           <h2>Расходы по категориям</h2>
           {bars(

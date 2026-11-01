@@ -1,3 +1,4 @@
+import LayoutToggle, { useListLayout } from "../components/ListLayout";
 import { useCallback, useEffect, useState } from "react";
 import { Bell } from "lucide-react";
 import Modal from "../components/Modal";
@@ -16,6 +17,7 @@ export default function Notifications({
   family: string;
   userId: string;
 }) {
+  const [layout, setLayout] = useListLayout("notifications");
   const [open, setOpen] = useState(false),
     [notices, setNotices] = useState<Notice[]>([]),
     [enabled, setEnabled] = useState(true),
@@ -167,29 +169,34 @@ export default function Notifications({
             </button>
             <button className="primary">Сохранить настройки</button>
           </form>
-          {enabled &&
-            notices.map((n) => (
-              <article className="k-item" key={n.id}>
-                <strong>{n.title}</strong>
-                <p>{n.body}</p>
-                {!n.read_at && (
-                  <button
-                    className="text-button"
-                    onClick={async () => {
-                      const { error } = await client()
-                        .from("notifications")
-                        .update({ read_at: new Date().toISOString() })
-                        .eq("id", n.id)
-                        .eq("user_id", userId);
-                      if (error) setError(errorText(error));
-                      else await refresh();
-                    }}
-                  >
-                    Прочитано
-                  </button>
-                )}
-              </article>
-            ))}
+          <div className="list-options">
+            <LayoutToggle value={layout} onChange={setLayout} />
+          </div>
+          <div className={`k-list list-layout list-layout--${layout}`}>
+            {enabled &&
+              notices.map((n) => (
+                <article className="k-item" key={n.id}>
+                  <strong>{n.title}</strong>
+                  <p>{n.body}</p>
+                  {!n.read_at && (
+                    <button
+                      className="text-button"
+                      onClick={async () => {
+                        const { error } = await client()
+                          .from("notifications")
+                          .update({ read_at: new Date().toISOString() })
+                          .eq("id", n.id)
+                          .eq("user_id", userId);
+                        if (error) setError(errorText(error));
+                        else await refresh();
+                      }}
+                    >
+                      Прочитано
+                    </button>
+                  )}
+                </article>
+              ))}
+          </div>
         </Modal>
       )}
     </>

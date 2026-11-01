@@ -256,9 +256,7 @@ test("поиск, фильтры, избранное, список и недос
       .getByRole("button", { name: "Избранное", exact: true })
       .click();
     await expect(page.locator(".recipe-card")).toHaveCount(1);
-    await page
-      .getByRole("button", { name: "Компактный список", exact: true })
-      .click();
+    await page.getByRole("button", { name: "Строки", exact: true }).click();
     await expect(page.locator(".recipe-list")).toBeVisible();
     await page.reload();
     await page

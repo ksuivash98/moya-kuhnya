@@ -1,0 +1,90 @@
+.list-layout-toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  max-width: 100%;
+}
+.list-layout-toggle button {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px 12px;
+  min-height: 42px;
+  border-radius: 9px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.list-layout-toggle button[aria-pressed="true"] {
+  background: var(--pale);
+  color: var(--text);
+}
+.list-layout-toggle button:hover {
+  background: var(--pale);
+}
+.list-options {
+  display: flex;
+  gap: 14px;
+  align-items: end;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+.list-options > label {
+  width: min(240px, 100%);
+}
+.list-layout.list-layout--list,
+.list-layout.list-layout--list.k-metrics {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+.list-layout--list > :is(.k-item, .panel) {
+  padding: 15px 18px;
+  border-radius: 14px;
+}
+.list-layout--list > .inventory-item--photo {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 8px 16px;
+  align-items: start;
+}
+.list-layout--list > .inventory-item--photo > :not(.inventory-item-photo) {
+  grid-column: 2;
+}
+.list-layout--list .inventory-item-photo {
+  grid-column: 1;
+  grid-row: 1 / span 6;
+  min-width: 0;
+}
+.list-layout--list .inventory-item-photo .recipe-photo {
+  height: 100px;
+  aspect-ratio: auto;
+  object-fit: contain;
+}
+.list-layout--list .inventory-item-photo .photo-open-hint {
+  font-size: 10px;
+  padding: 4px;
+}
+.list-layout--list .inventory-item--photo :is(h3, .k-actions) {
+  margin-top: 0;
+}
+@media (max-width: 480px) {
+  .list-layout--list > .inventory-item--photo {
+    grid-template-columns: 80px minmax(0, 1fr);
+    gap: 8px 12px;
+  }
+  .list-layout--list .inventory-item-photo .recipe-photo {
+    height: 80px;
+  }
+}
+
+.list-layout--list .inventory-item--photo > .pill {
+  justify-self: start;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

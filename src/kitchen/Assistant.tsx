@@ -1,3 +1,4 @@
+import LayoutToggle, { useListLayout } from "../components/ListLayout";
 import { useEffect, useState } from "react";
 import { client, check, errorText } from "../supabase";
 import type { ModuleProps } from "./KitchenPage";
@@ -25,6 +26,7 @@ export default function Assistant({
   reload,
   notify,
 }: ModuleProps) {
+  const [layout, setLayout] = useListLayout("assistant");
   const [prefs, setPrefs] = useState({
       likes: "",
       excluded: "",
@@ -297,78 +299,88 @@ export default function Assistant({
           <div className="k-section">
             <h3>Предварительный просмотр</h3>
             <p>{result.summary}</p>
-            {result.items.map((p, i) => (
-              <div key={i} className="k-item">
-                <strong>
-                  {recipes.find((r) => r.id === p.recipe_id)?.data.title ??
-                    "Рекомендация"}
-                </strong>
-                <p>{p.reason}</p>
-                {mode === "menu" && (
-                  <p>
-                    {p.meal} · {p.servings} порц.
-                  </p>
-                )}
-                {mode === "menu" && (
-                  <div className="form-grid">
-                    <label>
-                      Дата
-                      <input
-                        type="date"
-                        value={p.date}
-                        onChange={(e) =>
-                          setResult(
-                            (r) =>
-                              r && {
-                                ...r,
-                                items: r.items.map((x, n) =>
-                                  n === i ? { ...x, date: e.target.value } : x,
-                                ),
-                              },
-                          )
-                        }
-                      />
-                    </label>
-                    <label>
-                      Рецепт
-                      <select
-                        value={p.recipe_id}
-                        onChange={(e) =>
-                          setResult(
-                            (r) =>
-                              r && {
-                                ...r,
-                                items: r.items.map((x, n) =>
-                                  n === i
-                                    ? { ...x, recipe_id: e.target.value }
-                                    : x,
-                                ),
-                              },
-                          )
-                        }
-                      >
-                        {recipes.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.data.title}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                )}
-                <button
-                  className="text-button danger"
-                  onClick={() =>
-                    setResult(
-                      (r) =>
-                        r && { ...r, items: r.items.filter((_, n) => n !== i) },
-                    )
-                  }
-                >
-                  Удалить предложение
-                </button>
-              </div>
-            ))}
+            <div className="list-options">
+              <LayoutToggle value={layout} onChange={setLayout} />
+            </div>
+            <div className={`k-list list-layout list-layout--${layout}`}>
+              {result.items.map((p, i) => (
+                <div key={i} className="k-item">
+                  <strong>
+                    {recipes.find((r) => r.id === p.recipe_id)?.data.title ??
+                      "Рекомендация"}
+                  </strong>
+                  <p>{p.reason}</p>
+                  {mode === "menu" && (
+                    <p>
+                      {p.meal} · {p.servings} порц.
+                    </p>
+                  )}
+                  {mode === "menu" && (
+                    <div className="form-grid">
+                      <label>
+                        Дата
+                        <input
+                          type="date"
+                          value={p.date}
+                          onChange={(e) =>
+                            setResult(
+                              (r) =>
+                                r && {
+                                  ...r,
+                                  items: r.items.map((x, n) =>
+                                    n === i
+                                      ? { ...x, date: e.target.value }
+                                      : x,
+                                  ),
+                                },
+                            )
+                          }
+                        />
+                      </label>
+                      <label>
+                        Рецепт
+                        <select
+                          value={p.recipe_id}
+                          onChange={(e) =>
+                            setResult(
+                              (r) =>
+                                r && {
+                                  ...r,
+                                  items: r.items.map((x, n) =>
+                                    n === i
+                                      ? { ...x, recipe_id: e.target.value }
+                                      : x,
+                                  ),
+                                },
+                            )
+                          }
+                        >
+                          {recipes.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.data.title}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  )}
+                  <button
+                    className="text-button danger"
+                    onClick={() =>
+                      setResult(
+                        (r) =>
+                          r && {
+                            ...r,
+                            items: r.items.filter((_, n) => n !== i),
+                          },
+                      )
+                    }
+                  >
+                    Удалить предложение
+                  </button>
+                </div>
+              ))}
+            </div>
             {mode === "menu" && (
               <button
                 className="primary"

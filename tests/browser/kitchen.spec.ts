@@ -849,3 +849,299 @@ for (const kind of ["menu", "cooking"])
       await b.close();
     }
   });
+
+for (const kind of ["products", "preparations"])
+  test(`фильтры ${kind}: категория вместе с местом хранения и переключение вида`, async ({
+    page,
+  }) => {
+    const b = await recipeBackend(page);
+    try {
+      const places = (
+        await b.query<{ id: string; name: string }>(
+          "select id,name from public.storage_places",
+        )
+      ).rows;
+      const cold = places.find((p) => p.name === "Холодильник")!.id,
+        room = places.find((p) => p.name === "Кладовая")!.id;
+      const category = kind === "products" ? "Крупы" : "Овощные";
+      const otherCategory =
+        kind === "products" ? "Молочные продукты" : "Мясные";
+      const mutate = async (action: string, data: Record<string, unknown>) =>
+        b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+          b.family,
+          crypto.randomUUID(),
+          action,
+          data,
+        ]);
+      for (const [title, cat, place] of [
+        ["Первый запас", category, cold],
+        ["Второй запас", category, room],
+        ["Третий запас", otherCategory, cold],
+      ]) {
+        const id = crypto.randomUUID();
+        if (kind === "products") {
+          await mutate("product_save", {
+            id,
+            name: title,
+            category: cat,
+            unit: "г",
+            minimum: 0,
+            archived: false,
+          });
+          await mutate("batch_save", {
+            id: crypto.randomUUID(),
+            product_id: id,
+            quantity: 100,
+            unit: "г",
+            purchased_on: day(),
+            place_id: place,
+            reason: "Ручное добавление",
+          });
+        } else
+          await mutate("prep_save", {
+            id,
+            title,
+            category: cat,
+            quantity: 1,
+            unit: "порц.",
+            prepared_on: day(),
+            place_id: place,
+          });
+      }
+      await page.goto("/" + kind);
+      const cards = page.locator("article.inventory-item");
+      await expect(cards).toHaveCount(3);
+      const cats = page.getByRole("combobox", {
+          name: "Категория",
+          exact: true,
+        }),
+        location = page.getByRole("combobox", {
+          name: "Место хранения",
+          exact: true,
+        });
+      await cats.selectOption(category);
+      await expect(cards).toHaveCount(2);
+      await location.selectOption(cold);
+      await expect(cards).toHaveCount(1);
+      await expect(cards.first()).toContainText("Первый запас");
+      await page.getByRole("button", { name: "Строки", exact: true }).click();
+      await expect(cats).toHaveValue(category);
+      await expect(location).toHaveValue(cold);
+      await expect(cards).toHaveCount(1);
+      await page.getByRole("button", { name: "Плитка", exact: true }).click();
+      await expect(cards).toHaveCount(1);
+      await cats.selectOption(otherCategory);
+      await expect(cards).toHaveCount(1);
+      await expect(cards.first()).toContainText("Третий запас");
+      await location.selectOption(room);
+      await expect(cards).toHaveCount(0);
+      await expect(
+        page.getByText("По этим условиям запасов нет.", { exact: false }),
+      ).toBeVisible();
+      await cats.selectOption("");
+      await location.selectOption("");
+      await expect(cards).toHaveCount(3);
+      await page.getByRole("button", { name: "Строки", exact: true }).click();
+      await page.reload();
+      await expect(
+        page.getByRole("button", { name: "Строки", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+      await expect(cards).toHaveCount(3);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+    } finally {
+      await b.close();
+    }
+  });
+
+test("вид списка сохраняется отдельно в разделах после перезагрузки", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    await b.save("Рецепт для видов");
+    for (const route of [
+      "/recipes",
+      "/products",
+      "/preparations",
+      "/shopping",
+      "/budget",
+      "/menu",
+      "/cooking",
+      "/analytics",
+      "/",
+    ]) {
+      await page.goto(route);
+      const toggle = page.getByRole("group", {
+        name: "Вид списка",
+        exact: true,
+      });
+      await expect(toggle).toBeVisible();
+      await toggle.getByRole("button", { name: "Строки", exact: true }).click();
+      await expect(
+        toggle.getByRole("button", { name: "Строки", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+      await page.reload();
+      await expect(
+        toggle.getByRole("button", { name: "Строки", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+      await expect(
+        page
+          .locator(route === "/recipes" ? ".recipe-list" : ".list-layout--list")
+          .first(),
+      ).toBeAttached();
+      await toggle.getByRole("button", { name: "Плитка", exact: true }).click();
+      await expect(
+        toggle.getByRole("button", { name: "Плитка", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+      for (const width of [320, 768, 1024, 1366]) {
+        await page.setViewportSize({ width, height: 900 });
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth <= innerWidth,
+          ),
+          `${route} при ${width}px`,
+        ).toBe(true);
+      }
+      await page.reload();
+      await expect(
+        toggle.getByRole("button", { name: "Плитка", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+    }
+  } finally {
+    await b.close();
+  }
+});
+
+test("категория покупок фильтрует карточки, но очистка сохраняет область всего месяца", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  const month = day().slice(0, 7) + "-01";
+  try {
+    const mutate = async (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    for (const [name, category] of [
+      ["Соль", "Специи"],
+      ["Перец", "Специи"],
+      ["Лимон", "Фрукты"],
+    ]) {
+      const id = crypto.randomUUID();
+      await mutate("product_save", {
+        id,
+        name,
+        category,
+        unit: "г",
+        minimum: 0,
+        archived: false,
+      });
+      await mutate("shopping_save", {
+        id: crypto.randomUUID(),
+        product_id: id,
+        quantity: 10,
+        unit: "г",
+        month,
+        status: "open",
+      });
+    }
+    await page.goto("/shopping");
+    const cards = page.locator("article.k-item");
+    await expect(cards).toHaveCount(3);
+    await page
+      .getByRole("combobox", { name: "Категория списка", exact: true })
+      .selectOption("Специи");
+    await expect(cards).toHaveCount(2);
+    await page.getByRole("button", { name: "Строки", exact: true }).click();
+    await expect(cards).toHaveCount(2);
+    await page
+      .getByRole("button", { name: "Очистить покупки", exact: true })
+      .click();
+    const modal = page.getByRole("dialog");
+    await expect(modal).toContainText("3 позиций");
+    await expect(modal).toContainText("независимо от фильтра категории");
+    await modal.getByRole("button", { name: "Отмена", exact: true }).click();
+    await page
+      .getByRole("combobox", { name: "Категория списка", exact: true })
+      .selectOption("Мясо");
+    await expect(cards).toHaveCount(0);
+    await page
+      .getByRole("combobox", { name: "Категория списка", exact: true })
+      .selectOption("");
+    await expect(cards).toHaveCount(3);
+  } finally {
+    await b.close();
+  }
+});
+
+for (const kind of ["menu", "cooking"])
+  test(`категория ${kind}: фильтрует список, сохраняя календарь и месячный объём очистки`, async ({
+    page,
+  }) => {
+    const b = await recipeBackend(page),
+      month = day().slice(0, 7) + "-01";
+    try {
+      const soup = await b.save("Овощной суп"),
+        main = await b.save("Основное блюдо");
+      await b.query("select public.save_recipe($1,$2,$3,$4)", [
+        soup.id,
+        b.family,
+        { ...soup.data, category: "Супы" },
+        1,
+      ]);
+      for (const recipe of [soup.id, main.id])
+        await b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+          b.family,
+          crypto.randomUUID(),
+          kind === "menu" ? "menu_save" : "task_save",
+          {
+            id: crypto.randomUUID(),
+            recipe_id: recipe,
+            date: day(),
+            month,
+            meal: "Ужин",
+            servings: 4,
+            planned_count: 1,
+            status: "Запланировано",
+            planned_preparations: 0,
+          },
+        ]);
+      await page.goto("/" + kind);
+      await page.getByRole("button", { name: "Строки", exact: true }).click();
+      const cards = page.locator("article.k-item");
+      await expect(cards).toHaveCount(2);
+      await page
+        .getByRole("combobox", { name: "Категория", exact: true })
+        .selectOption("Супы");
+      await expect(cards).toHaveCount(1);
+      await expect(cards.first()).toContainText("Овощной суп");
+      await page
+        .getByRole("button", {
+          name:
+            kind === "menu" ? "Очистить меню" : "Очистить план приготовления",
+          exact: true,
+        })
+        .click();
+      await expect(page.getByRole("dialog")).toContainText("2 незавершённых");
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Отмена", exact: true })
+        .click();
+      await page.getByRole("button", { name: "Неделя", exact: true }).click();
+      await expect(page.locator(".k-calendar")).toBeVisible();
+      await expect(cards).toHaveCount(1);
+      await page
+        .getByRole("combobox", { name: "Категория", exact: true })
+        .selectOption("");
+      await expect(cards).toHaveCount(2);
+    } finally {
+      await b.close();
+    }
+  });

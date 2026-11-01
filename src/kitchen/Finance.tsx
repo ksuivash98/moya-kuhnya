@@ -1,5 +1,6 @@
+import LayoutToggle, { useListLayout } from "../components/ListLayout";
 import { useSearchParams } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { ModuleProps } from "./KitchenPage";
 import Modal from "../components/Modal";
 import Fields, { type Field } from "./Fields";
@@ -27,6 +28,12 @@ export default function Finance({
   notify,
 }: ModuleProps & { kind: string }) {
   const [params] = useSearchParams();
+  const [layout, setLayout] = useListLayout(kind);
+  const [category, setCategory] = useState("");
+  useEffect(() => {
+    setCategory("");
+    setPage(0);
+  }, [kind]);
   const [clearRequest, setClearRequest] = useState<{
     key: string;
     month: string;
@@ -216,13 +223,22 @@ export default function Finance({
       setBusy(false);
     }
   }
-  const list = shopping
+  const allItems = shopping
     ? rows(state, "shopping_items")
         .filter((r) => str(r, "month").startsWith(month) && r.status === "open")
         .sort((a, b) =>
           str(a, "category").localeCompare(str(b, "category"), "ru"),
         )
     : rows(state, "expenses").filter((r) => str(r, "date").startsWith(month));
+  const list = allItems.filter(
+    (r) => !category || str(r, "category") === category,
+  );
+  const categories = [
+    ...new Set([
+      ...productCategories,
+      ...allItems.map((r) => str(r, "category")),
+    ]),
+  ].filter(Boolean);
   return (
     <>
       {shopping && params.get("recipe") && canEdit && (
@@ -262,7 +278,7 @@ export default function Finance({
         </div>
       )}
       {!shopping && (
-        <div className="k-metrics">
+        <div className={`k-metrics list-layout list-layout--${layout}`}>
           {[
             { name: "Бюджет месяца", value: summary.budget },
             { name: "Потрачено", value: summary.spent },
@@ -297,13 +313,13 @@ export default function Finance({
                 </button>
                 <button
                   className="secondary danger"
-                  disabled={busy || !navigator.onLine || !list.length}
+                  disabled={busy || !navigator.onLine || !allItems.length}
                   onClick={() => {
                     setClearError("");
                     setClearRequest({
                       key: crypto.randomUUID(),
                       month: month + "-01",
-                      items: list.map((r) => ({
+                      items: allItems.map((r) => ({
                         id: r.id,
                         version: r.version,
                       })),
@@ -339,14 +355,42 @@ export default function Finance({
           ? "Список учитывает незавершённые блюда и совместимые единицы. Фактическая покупка одновременно создаёт партию и расход. Новые продукты для ручного списка добавляются в разделе «Продукты»."
           : "Все суммы рассчитаны по финансовому журналу. Корректировки сохраняют прежние записи и создают компенсации; прогноз — пропорция текущих расходов по дням, а не обещание."}
       </p>
+      <div className="list-options">
+        <label>
+          Категория
+          <select
+            aria-label="Категория списка"
+            value={category}
+            onChange={(e) => {
+              setCategory(e.target.value);
+              setPage(0);
+            }}
+          >
+            <option value="">Все категории</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </label>
+        <LayoutToggle value={layout} onChange={setLayout} />
+      </div>
+      <p className="help-text">
+        {shopping
+          ? "Фильтр меняет только список «Нужно купить». История, итоги и очистка относятся ко всему выбранному месяцу."
+          : "Фильтр меняет только список расходов. Итоги рассчитаны по всему выбранному месяцу."}
+      </p>
       {!list.length && (
         <div className="panel k-empty">
-          {shopping
-            ? "Список покупок пуст. Рассчитайте недостающее по плану или добавьте вручную."
-            : "За выбранный месяц расходов нет."}
+          {category
+            ? "В этой категории записей нет. Выберите другую или все категории."
+            : shopping
+              ? "Список покупок пуст. Рассчитайте недостающее по плану или добавьте вручную."
+              : "За выбранный месяц расходов нет."}
         </div>
       )}
-      <div className="k-list">
+      <div className={`k-list list-layout list-layout--${layout}`}>
         {list.slice(page * 20, (page + 1) * 20).map((r) => (
           <article className="k-item" key={r.id}>
             <span className="pill quiet">{str(r, "category")}</span>
@@ -413,54 +457,58 @@ export default function Finance({
       {shopping && (
         <section className="panel k-section">
           <h2>История покупок</h2>
-          {rows(state, "purchases")
-            .filter((p) => str(p, "date").startsWith(month))
-            .map((p) => (
-              <div key={p.id} className="k-item">
-                <strong>
-                  {str(
-                    rows(state, "expenses").find((e) => e.id === p.expense_id),
-                    "title",
-                  ) || "Покупка"}
-                </strong>
-                <p>
-                  {str(p, "date")} · {fmt(num(p, "quantity"))} {str(p, "unit")}{" "}
-                  · {rub(num(p, "amount"))} ·{" "}
-                  {p.status === "confirmed" ? "Подтверждено" : "Отменено"}
-                </p>
-                {canEdit && p.status === "confirmed" && (
-                  <button
-                    className="text-button danger"
-                    disabled={busy}
-                    onClick={async () => {
-                      if (
-                        !confirm(
-                          "Отменить покупку? Остаток и расход будут компенсированы. Использованную покупку отменить нельзя.",
+          <div className={`k-list list-layout list-layout--${layout}`}>
+            {rows(state, "purchases")
+              .filter((p) => str(p, "date").startsWith(month))
+              .map((p) => (
+                <div key={p.id} className="k-item">
+                  <strong>
+                    {str(
+                      rows(state, "expenses").find(
+                        (e) => e.id === p.expense_id,
+                      ),
+                      "title",
+                    ) || "Покупка"}
+                  </strong>
+                  <p>
+                    {str(p, "date")} · {fmt(num(p, "quantity"))}{" "}
+                    {str(p, "unit")} · {rub(num(p, "amount"))} ·{" "}
+                    {p.status === "confirmed" ? "Подтверждено" : "Отменено"}
+                  </p>
+                  {canEdit && p.status === "confirmed" && (
+                    <button
+                      className="text-button danger"
+                      disabled={busy}
+                      onClick={async () => {
+                        if (
+                          !confirm(
+                            "Отменить покупку? Остаток и расход будут компенсированы. Использованную покупку отменить нельзя.",
+                          )
                         )
-                      )
-                        return;
-                      setBusy(true);
-                      try {
-                        await mutate(
-                          family,
-                          "purchase_reverse",
-                          { id: p.id },
-                          crypto.randomUUID(),
-                        );
-                        await reload();
-                        notify("Покупка компенсирована; история сохранена.");
-                      } catch (e) {
-                        notify(errorText(e));
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
-                  >
-                    Отменить покупку
-                  </button>
-                )}
-              </div>
-            ))}
+                          return;
+                        setBusy(true);
+                        try {
+                          await mutate(
+                            family,
+                            "purchase_reverse",
+                            { id: p.id },
+                            crypto.randomUUID(),
+                          );
+                          await reload();
+                          notify("Покупка компенсирована; история сохранена.");
+                        } catch (e) {
+                          notify(errorText(e));
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      Отменить покупку
+                    </button>
+                  )}
+                </div>
+              ))}
+          </div>
         </section>
       )}
       {clearRequest && (
@@ -477,6 +525,7 @@ export default function Finance({
             ?
           </p>
           <p className="notice">
+            Очистка относится ко всему месяцу, независимо от фильтра категории.
             Оплаченные покупки, расходы, запасы и другие месяцы сохранятся. При
             новом расчёте по меню недостающие продукты могут появиться снова.
           </p>
