@@ -1,3 +1,4 @@
+import { importCategories } from "../supabase/functions/_shared/recipe-import";
 import { describe, expect, test } from "vitest";
 import {
   blankRecipe,
@@ -60,7 +61,7 @@ describe("Книга рецептов — расчёты и валидация",
     ).toBeNull();
     expect(validate({ ...data(), prep: NaN })).toBeTruthy();
     expect(validate({ ...data(), cook: -1 })).toBeTruthy();
-    expect(categories).toHaveLength(12);
+    expect(categories).toEqual(importCategories);
     expect(units).toHaveLength(10);
   });
   test("перестановка шагов сохраняет идентификаторы и не меняет оригинал", () => {

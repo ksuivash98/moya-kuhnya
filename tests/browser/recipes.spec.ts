@@ -769,13 +769,11 @@ test("фотографии целиком: вертикальная обложк
         },
         { width, height },
       );
-      await page
-        .getByLabel(label, { exact: true })
-        .setInputFiles({
-          name: "photo.png",
-          mimeType: "image/png",
-          buffer: Buffer.from(png, "base64"),
-        });
+      await page.getByLabel(label, { exact: true }).setInputFiles({
+        name: "photo.png",
+        mimeType: "image/png",
+        buffer: Buffer.from(png, "base64"),
+      });
       const img = page.getByRole("img", { name: label, exact: true });
       await expect(img).toBeVisible();
       await expect(img).toHaveCSS("object-fit", "contain");
@@ -840,5 +838,87 @@ test("фотографии целиком: вертикальная обложк
     ).toBe(true);
   } finally {
     await backend.close();
+  }
+});
+
+test("уточнение основной категории рецепта и фильтры мясных, рыбных и блюд с гарниром", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const recipe = await b.save("Рецепт для уточнения категории");
+    for (const category of [
+      "Основные блюда",
+      "Мясные блюда",
+      "Рыбные блюда",
+      "Блюда с гарниром",
+    ]) {
+      await page.goto(`/recipes?recipe=${recipe.id}`);
+      await page
+        .getByRole("button", { name: "Редактировать", exact: true })
+        .click();
+      await page
+        .getByLabel("Категория", { exact: true })
+        .selectOption(category);
+      await page
+        .getByRole("button", { name: "Сохранить рецепт", exact: true })
+        .click();
+      await expect(
+        page.getByRole("button", { name: "Редактировать", exact: true }),
+      ).toBeVisible();
+      await page.goto("/recipes");
+      await page.getByRole("button", { name: category, exact: true }).click();
+      await expect(page.locator(".recipe-card")).toHaveCount(1);
+      await expect(page.locator(".recipe-card")).toContainText(category);
+      await page.getByRole("button", { name: "Супы", exact: true }).click();
+      await expect(page.locator(".recipe-card")).toHaveCount(0);
+    }
+    await page.reload();
+    await expect(page.locator(".recipe-card")).toHaveCount(1);
+    await expect(page.locator(".recipe-card")).toContainText(
+      "Блюда с гарниром",
+    );
+    await page.goto(`/recipes?recipe=${recipe.id}`);
+    await page
+      .getByRole("button", { name: "Редактировать", exact: true })
+      .click();
+    await page
+      .getByLabel("Категория", { exact: true })
+      .selectOption("Рыбные блюда");
+    let migrationMissing = true;
+    await page.route("**/rest/v1/rpc/save_recipe", async (route) => {
+      if (migrationMissing)
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: "23503",
+            message:
+              'insert or update on table "recipes" violates foreign key constraint "recipes_category_fkey"',
+          }),
+        });
+      else await route.fallback();
+    });
+    await page
+      .getByRole("button", { name: "Сохранить рецепт", exact: true })
+      .click();
+    await expect(
+      page.getByText(/Для новых категорий рецептов примените миграцию 014/),
+    ).toBeVisible();
+    await expect(page.getByLabel("Категория", { exact: true })).toHaveValue(
+      "Рыбные блюда",
+    );
+    await expect(
+      page.getByLabel("Название рецепта *", { exact: true }),
+    ).toHaveValue("Рецепт для уточнения категории");
+    migrationMissing = false;
+    await page
+      .getByRole("button", { name: "Сохранить рецепт", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Редактировать", exact: true }),
+    ).toBeVisible();
+  } finally {
+    await b.close();
   }
 });

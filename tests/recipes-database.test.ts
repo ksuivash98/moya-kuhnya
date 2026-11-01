@@ -56,6 +56,12 @@ beforeAll(async () => {
       "utf8",
     ),
   );
+  await db.exec(
+    readFileSync(
+      "supabase/migrations/202611010014_recipe_categories.sql",
+      "utf8",
+    ),
+  );
   for (const id of [owner, adult, stranger, child])
     await db.query("insert into auth.users(id) values($1)", [id]);
   await user(owner);
@@ -499,4 +505,54 @@ test("инструкция заморозки: совместимость, уд�
       rid,
     ]),
   ).toBe("");
+});
+
+test("новые категории: сохранение, повторная миграция и прежняя семейная изоляция", async () => {
+  await user(owner);
+  const categoryData = (category: string) => ({
+    ...data,
+    category,
+    ingredients: data.ingredients.map((i) => ({
+      ...i,
+      id: crypto.randomUUID(),
+    })),
+    steps: data.steps.map((s) => ({ ...s, id: crypto.randomUUID() })),
+  });
+  const legacy = crypto.randomUUID();
+  await save(categoryData("Основные блюда"), null, legacy);
+  await db.exec("reset role");
+  await db.exec(
+    readFileSync(
+      "supabase/migrations/202611010014_recipe_categories.sql",
+      "utf8",
+    ),
+  );
+  await user(owner);
+  expect(
+    await scalar("select category from public.recipes where id=$1", [legacy]),
+  ).toBe("Основные блюда");
+  expect(
+    await scalar("select version from public.recipes where id=$1", [legacy]),
+  ).toBe(1);
+  for (const category of ["Мясные блюда", "Рыбные блюда", "Блюда с гарниром"]) {
+    const rid = crypto.randomUUID();
+    await save(categoryData(category), null, rid);
+    expect(
+      await scalar("select category from public.recipes where id=$1", [rid]),
+    ).toBe(category);
+    await user(child);
+    await expect(save({ ...data, category }, 1, rid)).rejects.toThrow();
+    await user(stranger);
+    expect(
+      await scalar("select count(*)::int from public.recipes where id=$1", [
+        rid,
+      ]),
+    ).toBe(0);
+    await user(owner);
+  }
+  await expect(
+    db.query(
+      "insert into public.recipe_categories(name,position) values('Чужая категория',999)",
+    ),
+  ).rejects.toThrow();
 });

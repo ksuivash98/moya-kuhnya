@@ -294,6 +294,8 @@ export default function RecipeForm({
                 <label>
                   Категория
                   <select
+                    aria-label="Категория"
+                    aria-describedby="recipe-category-help"
                     value={data.category}
                     onChange={(e) => change("category", e.target.value)}
                   >
@@ -301,6 +303,12 @@ export default function RecipeForm({
                       <option key={c}>{c}</option>
                     ))}
                   </select>
+                  <small id="recipe-category-help" className="help-text">
+                    Мясные и рыбные блюда — без гарнира в рецепте. «Блюда с
+                    гарниром» — например, плов или рыба с картофелем. «Гарниры»
+                    — отдельно рис, овощи или картофель. «Основные блюда» — если
+                    категория пока не уточнена.
+                  </small>
                 </label>
                 <label>
                   Сложность

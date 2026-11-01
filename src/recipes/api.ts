@@ -242,6 +242,16 @@ export async function saveRecipe(
       throw new Error(
         "Для сохранения инструкции по заморозке примените миграцию 010 в Supabase. Рецепт не сохранён; ваши изменения остаются в форме.",
       );
+    if (
+      error?.code === "23503" &&
+      ["Мясные блюда", "Рыбные блюда", "Блюда с гарниром"].includes(
+        next.category,
+      ) &&
+      /categor/i.test(error.message ?? "")
+    )
+      throw new Error(
+        "Для новых категорий рецептов примените миграцию 014 в Supabase. Рецепт не сохранён; изменения остаются в форме.",
+      );
     check(error);
     const retained = new Set(photoPaths(next));
     const removed = oldData
