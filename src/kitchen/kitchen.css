@@ -203,10 +203,12 @@ details .checkbox-label {
   background: var(--green);
   border-radius: 10px;
 }
-@media (max-width: 1200px) {
+@media (max-width: 1400px) {
   .k-calendar {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+}
+@media (max-width: 1200px) {
   .k-list {
     grid-template-columns: 1fr;
   }
@@ -397,17 +399,6 @@ details .checkbox-label {
 .k-day .k-item:first-child {
   margin-top: 0;
 }
-.k-day .planning-item-summary p {
-  margin: 6px 0;
-}
-.k-day .planning-item-tools button {
-  padding: 7px 2px;
-  width: 100%;
-  white-space: nowrap;
-  min-height: 36px;
-  font-size: 11px;
-  max-width: 100%;
-}
 .planning-actions-dialog .k-actions {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -441,11 +432,65 @@ details .checkbox-label {
   .k-day-items {
     max-height: 240px;
   }
-  .k-day .planning-item-summary p {
+}
+
+/* Calendar entries are single-line rows; full details open on press. */
+.k-day .calendar-meal {
+  padding: 0;
+  margin-top: 5px;
+  border-radius: 8px;
+}
+.calendar-meal-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px;
+  color: var(--text);
+  text-align: left;
+}
+.k-day .calendar-meal-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.calendar-meal-quantity {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--muted);
+}
+.calendar-meal-row > [aria-hidden] {
+  flex-shrink: 0;
+}
+.calendar-meal-row:hover {
+  background: var(--surface);
+  border-radius: inherit;
+}
+.calendar-meal-row:focus-visible {
+  outline-offset: -2px;
+}
+@media (max-width: 720px) {
+  .calendar-meal-row {
+    min-height: 44px;
+    padding: 9px;
+    gap: 8px;
+  }
+  .k-day .calendar-meal-title {
+    font-size: 13px;
+  }
+  .calendar-meal-quantity {
     font-size: 12px;
   }
-  .k-day .planning-item-tools button {
-    min-height: 40px;
-    font-size: 12px;
-  }
+}
+.calendar-meal[data-status="Отменено"] .calendar-meal-title {
+  text-decoration: line-through;
+  color: var(--muted);
 }

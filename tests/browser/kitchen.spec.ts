@@ -27,8 +27,8 @@ test("единая кухня: меню → покупка → запасы → 
       .getByRole("button", { name: "Сохранить", exact: true })
       .click();
     await expect(
-      page.locator(".k-calendar").getByRole("heading", {
-        name: "Сырники для сквозного сценария",
+      page.locator(".k-calendar").getByRole("button", {
+        name: "Действия: Сырники для сквозного сценария",
         exact: true,
       }),
     ).toBeVisible();
@@ -203,7 +203,7 @@ test("офлайн-меню использует изолированный кэ
     await expect(
       page
         .locator(".k-calendar")
-        .getByRole("heading", { name: "Офлайн-рецепт", exact: true }),
+        .getByRole("button", { name: "Действия: Офлайн-рецепт", exact: true }),
     ).toBeVisible();
   } finally {
     await context.setOffline(false);
@@ -833,11 +833,11 @@ for (const kind of ["menu", "cooking"])
       ).toHaveLength(1);
       await page.getByLabel("Показывать отменённые", { exact: true }).check();
       await expect(
-        page.locator("article.k-item").filter({ hasText: "Отменено" }).first(),
+        page.locator('article.k-item[data-status="Отменено"]').first(),
       ).toBeVisible();
       await page.getByLabel("Показывать отменённые", { exact: true }).uncheck();
       await expect(
-        page.locator("article.k-item").filter({ hasText: "Отменено" }),
+        page.locator('article.k-item[data-status="Отменено"]'),
       ).toHaveCount(0);
       await page.reload();
       await expect(clear).toBeDisabled();
@@ -1196,6 +1196,9 @@ test("календарь с множеством блюд: ограниченн�
       const today = page.locator(".k-day.is-today");
       const contents = today.locator(".k-day-items");
       await expect(today.locator("article")).toHaveCount(8);
+      for (const row of await today.locator("article").all()) {
+        expect((await row.boundingBox())!.height).toBeLessThanOrEqual(46);
+      }
       const bounds = await today.boundingBox();
       expect(bounds!.height).toBeLessThanOrEqual(320);
       expect(
@@ -1219,6 +1222,9 @@ test("календарь с множеством блюд: ограниченн�
         name: "Действия с блюдом",
         exact: true,
       });
+      await expect(actions).toContainText("Блюдо для компактного календаря");
+      await expect(actions).toContainText("Запланировано");
+      await expect(actions).toContainText("1 приготовл.");
       await expect(
         actions.getByRole("button", {
           name: "Подтвердить готовку",
@@ -1252,6 +1258,33 @@ test("календарь с множеством блюд: ограниченн�
         path: testInfo.outputPath(`compact-calendar-${theme}.png`),
       });
     }
+    await b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+      b.family,
+      crypto.randomUUID(),
+      "task_save",
+      {
+        id: crypto.randomUUID(),
+        recipe_id: recipe.id,
+        date: day(),
+        servings: 4,
+        status: "Запланировано",
+        planned_preparations: 0,
+      },
+    ]);
+    await page.goto("/cooking");
+    await page.getByRole("button", { name: "Неделя", exact: true }).click();
+    await page.locator(".calendar-meal-row").click();
+    const taskDialog = page.getByRole("dialog", {
+      name: "Действия с блюдом",
+      exact: true,
+    });
+    await taskDialog.getByText("Шаги приготовления", { exact: true }).click();
+    const step = taskDialog.getByRole("checkbox").first();
+    await step.click();
+    await expect(step).toBeChecked();
+    await expect(step).toBeEnabled();
+    await step.click();
+    await expect(step).not.toBeChecked();
     expect(
       (
         await b.query(

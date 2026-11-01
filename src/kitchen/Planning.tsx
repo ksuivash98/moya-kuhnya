@@ -365,14 +365,84 @@ export default function Planning({
       </div>
     );
   }
-  function card(r: Row) {
+  function cookingSteps(r: Row) {
     const completed = [
       "Приготовлено",
       "Сделана заготовка",
       "Приготовлено из заготовки",
     ].includes(str(r, "status"));
+    return kind === "cooking" ? (
+      <details className="planning-item-steps">
+        <summary>Шаги приготовления</summary>
+        {((snapshot(r).steps ?? []) as Record<string, Json>[]).map((s) => (
+          <label className="checkbox-label" key={String(s.id)}>
+            <input
+              type="checkbox"
+              disabled={!canEdit || completed || confirmBusy}
+              checked={((r.checked_steps ?? []) as string[]).includes(
+                String(s.id),
+              )}
+              onChange={async (e) => {
+                setConfirmBusy(true);
+                try {
+                  const checked = new Set((r.checked_steps ?? []) as string[]);
+                  if (e.target.checked) checked.add(String(s.id));
+                  else checked.delete(String(s.id));
+                  await save(
+                    "task_save",
+                    { ...r, checked_steps: [...checked] },
+                    crypto.randomUUID(),
+                  );
+                } catch (err) {
+                  notify(errorText(err));
+                } finally {
+                  setConfirmBusy(false);
+                }
+              }}
+            />
+            {String(s.description)}
+          </label>
+        ))}
+      </details>
+    ) : null;
+  }
+  function card(r: Row) {
+    if (inCalendar)
+      return (
+        <article
+          className="k-item planning-item calendar-meal"
+          data-status={str(r, "status")}
+          key={r.id}
+        >
+          <button
+            type="button"
+            className="calendar-meal-row"
+            aria-label={`Действия: ${str(r, "title")}`}
+            title={[str(r, "title"), str(r, "meal"), str(r, "status")]
+              .filter(Boolean)
+              .join(" · ")}
+            onClick={(e) => {
+              actionTrigger.current = e.currentTarget;
+              setActionRow(r);
+            }}
+          >
+            <span className="calendar-meal-title">{str(r, "title")}</span>
+            <span
+              className="calendar-meal-quantity"
+              aria-label={`${fmt(num(r, "servings"))} порций`}
+            >
+              {fmt(num(r, "servings"))} п.
+            </span>
+            <span aria-hidden="true">⋯</span>
+          </button>
+        </article>
+      );
     return (
-      <article className="k-item planning-item" key={r.id}>
+      <article
+        className="k-item planning-item"
+        data-status={str(r, "status")}
+        key={r.id}
+      >
         <div className="planning-item-title">
           <span className="pill quiet">{str(r, "meal") || str(r, "date")}</span>
           <h3>{str(r, "title")}</h3>
@@ -388,7 +458,7 @@ export default function Planning({
             </small>
           ) : null}
         </div>
-        {inCalendar || layout === "list" ? (
+        {layout === "list" ? (
           <div className="planning-item-tools">
             {canEdit ? (
               <button
@@ -409,45 +479,13 @@ export default function Planning({
         ) : (
           actionButtons(r)
         )}
-        {kind === "cooking" && (
-          <details className="planning-item-steps">
-            <summary>Шаги приготовления</summary>
-            {((snapshot(r).steps ?? []) as Record<string, Json>[]).map((s) => (
-              <label className="checkbox-label" key={String(s.id)}>
-                <input
-                  type="checkbox"
-                  disabled={!canEdit || completed || confirmBusy}
-                  checked={((r.checked_steps ?? []) as string[]).includes(
-                    String(s.id),
-                  )}
-                  onChange={async (e) => {
-                    setConfirmBusy(true);
-                    try {
-                      const checked = new Set(
-                        (r.checked_steps ?? []) as string[],
-                      );
-                      if (e.target.checked) checked.add(String(s.id));
-                      else checked.delete(String(s.id));
-                      await save(
-                        "task_save",
-                        { ...r, checked_steps: [...checked] },
-                        crypto.randomUUID(),
-                      );
-                    } catch (err) {
-                      notify(errorText(err));
-                    } finally {
-                      setConfirmBusy(false);
-                    }
-                  }}
-                />
-                {String(s.description)}
-              </label>
-            ))}
-          </details>
-        )}
+        {cookingSteps(r)}
       </article>
     );
   }
+  const actionDetails = actionRow
+    ? (active.find((r) => r.id === actionRow.id) ?? actionRow)
+    : null;
   let days = calendarDays(month);
   if (mode === "Неделя") {
     const day = (new Date(anchor + "T12:00:00Z").getUTCDay() + 6) % 7;
@@ -719,14 +757,33 @@ export default function Planning({
             </details>
           ))}
       </section>
-      {actionRow && (
+      {actionDetails && (
         <Modal
           title="Действия с блюдом"
           className="planning-actions-dialog"
           onClose={closeActions}
         >
-          <p className="muted">{str(actionRow, "title")}</p>
-          {actionButtons(actionRow)}
+          <h3>{str(actionDetails, "title")}</h3>
+          <p className="muted">
+            {[
+              str(actionDetails, "meal"),
+              str(actionDetails, "date"),
+              `${fmt(num(actionDetails, "servings"))} порц.`,
+              str(actionDetails, "status"),
+              actionDetails.planned_count
+                ? `${num(actionDetails, "planned_count")} приготовл.`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+          {num(actionDetails, "planned_preparations") > 0 && (
+            <p className="muted">
+              Заготовки: {fmt(num(actionDetails, "planned_preparations"))} порц.
+            </p>
+          )}
+          {actionButtons(actionDetails)}
+          {inCalendar && cookingSteps(actionDetails)}
         </Modal>
       )}
       {clearRequest && (
