@@ -501,16 +501,26 @@ export default function Planning({
     days = Array.from({ length: 7 }, (_, i) => addDays(anchor, i - day));
   }
   if (mode === "День") days = [anchor];
+  const selectedDays = new Set(days);
+  const datedPeriod = mode === "Неделя" || mode === "День";
+  const inSelectedPeriod = (r: Row) => selectedDays.has(str(r, "date"));
   const requirements = needs(
     state,
-    kind === "cooking"
-      ? tasks
-      : [
-          ...menu,
-          ...rows(state, "cooking_tasks").filter((t) =>
-            str(t, "date").startsWith(month),
-          ),
-        ],
+    datedPeriod
+      ? [
+          ...(kind === "menu"
+            ? rows(state, "menu_items").filter(inSelectedPeriod)
+            : []),
+          ...rows(state, "cooking_tasks").filter(inSelectedPeriod),
+        ]
+      : kind === "cooking"
+        ? tasks
+        : [
+            ...menu,
+            ...rows(state, "cooking_tasks").filter((t) =>
+              str(t, "date").startsWith(month),
+            ),
+          ],
   );
   return (
     <>
@@ -594,9 +604,10 @@ export default function Planning({
         </label>
       </div>
       <p className="help-text">
-        Категория меняет только карточки. Ингредиенты и очистка относятся ко
-        всему месяцу. Плитка и строки показывают список за месяц; календарные
-        режимы доступны отдельно.
+        Категория меняет только карточки. Ингредиенты рассчитываются для
+        выбранного дня, недели или месяца. Очистка относится ко всему месяцу.
+        Плитка и строки показывают список за месяц; календарные режимы доступны
+        отдельно.
       </p>
       {!recipes.length && (
         <p className="notice">
@@ -702,6 +713,13 @@ export default function Planning({
       )}
       <section className="panel k-section">
         <h2>Ингредиенты плана</h2>
+        <p className="muted">
+          {mode === "День"
+            ? `За день: ${anchor}`
+            : mode === "Неделя"
+              ? `За неделю: ${days[0]} — ${days[6]}`
+              : `За месяц: ${month}`}
+        </p>
         <p className="muted">
           Единицы г/кг и мл/л объединяются; остальные считаются отдельно. «По
           вкусу» уточните при готовке. Просроченные партии не учитываются.

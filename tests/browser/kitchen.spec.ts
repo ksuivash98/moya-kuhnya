@@ -1828,3 +1828,112 @@ test("редактор продуктов недоступен ребёнку б
     await b.close();
   }
 });
+
+for (const kind of ["menu", "cooking"])
+  test(`ингредиенты ${kind}: день, неделя через границу месяца и возврат к месяцу`, async ({
+    page,
+  }) => {
+    const b = await recipeBackend(page);
+    try {
+      const recipe = await b.save("Блюдо для выбранного периода");
+      const mutate = (action: string, data: Record<string, unknown>) =>
+        b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+          b.family,
+          crypto.randomUUID(),
+          action,
+          data,
+        ]);
+      for (const date of [
+        "2030-04-01",
+        "2030-04-29",
+        "2030-04-30",
+        "2030-05-01",
+        "2030-05-06",
+        ...(kind === "menu" ? [""] : []),
+      ]) {
+        const id = crypto.randomUUID();
+        const data = {
+          id,
+          recipe_id: recipe.id,
+          month: (date || "2030-04-01").slice(0, 7) + "-01",
+          date,
+          meal: "Обед",
+          servings: recipe.data.servings,
+          planned_count: 1,
+          planned_preparations: 0,
+          status: "Запланировано",
+        };
+        await mutate(kind === "menu" ? "menu_save" : "task_save", data);
+        // Связанный план готовки заменяет потребность меню, а не удваивает её.
+        if (kind === "menu" && date === "2030-04-30")
+          await mutate("task_save", {
+            ...data,
+            id: crypto.randomUUID(),
+            menu_id: id,
+          });
+      }
+      for (const status of ["Отменено"])
+        await mutate(kind === "menu" ? "menu_save" : "task_save", {
+          id: crypto.randomUUID(),
+          recipe_id: recipe.id,
+          month: "2030-05-01",
+          date: "2030-05-02",
+          meal: "Обед",
+          servings: recipe.data.servings,
+          planned_count: 1,
+          planned_preparations: 0,
+          status,
+        });
+      await page.goto("/" + kind);
+      await page.getByLabel("Месяц", { exact: true }).fill("2030-04");
+      const panel = page.locator("section.panel").filter({
+        has: page.getByRole("heading", {
+          name: "Ингредиенты плана",
+          exact: true,
+        }),
+      });
+      const needed = panel.locator("tbody tr").first().locator("td").nth(1);
+      await expect(needed).toHaveText(
+        kind === "menu" ? /^2\s*000\s*г$/ : /^1\s*500\s*г$/,
+      );
+      await page.getByRole("button", { name: "Неделя", exact: true }).click();
+      await page
+        .getByLabel("Выбранный день", { exact: true })
+        .fill("2030-04-30");
+      await expect(panel).toContainText("За неделю: 2030-04-29 — 2030-05-05");
+      await expect(needed).toHaveText(/^1\s*500\s*г$/);
+      await page
+        .getByRole("button", { name: "Вперёд по датам", exact: true })
+        .click();
+      await expect(needed).toHaveText(/^500\s*г$/);
+      await page
+        .getByRole("button", { name: "Назад по датам", exact: true })
+        .click();
+      await expect(needed).toHaveText(/^1\s*500\s*г$/);
+      await page.getByRole("button", { name: "День", exact: true }).click();
+      await expect(panel).toContainText("За день: 2030-04-30");
+      await expect(needed).toHaveText(/^500\s*г$/);
+      await page
+        .getByRole("button", { name: "Вперёд по датам", exact: true })
+        .click();
+      await expect(panel).toContainText("За день: 2030-05-01");
+      await expect(needed).toHaveText(/^500\s*г$/);
+      await page
+        .getByRole("button", { name: "Вперёд по датам", exact: true })
+        .click();
+      await expect(panel).toContainText("Нет незавершённых блюд");
+      await expect(panel.locator("table")).toHaveCount(0);
+      await page
+        .getByRole("button", {
+          name: kind === "menu" ? "Месяц" : "Список",
+          exact: true,
+        })
+        .click();
+      await expect(panel).toContainText("За месяц: 2030-04");
+      await expect(needed).toHaveText(
+        kind === "menu" ? /^2\s*000\s*г$/ : /^1\s*500\s*г$/,
+      );
+    } finally {
+      await b.close();
+    }
+  });
