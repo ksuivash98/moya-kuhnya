@@ -1564,3 +1564,151 @@ test("строки запасов: горизонтальные колонки �
     await b.close();
   }
 });
+
+test("редактор продуктов: правка без запасов, подтверждение удаления, история и восстановление", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const empty = crypto.randomUUID(),
+      stocked = crypto.randomUUID();
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    for (const [id, name] of [
+      [empty, "Старая специя"],
+      [stocked, "Рис с остатком"],
+    ]) {
+      await mutate("product_save", {
+        id,
+        name,
+        category: "Специи",
+        unit: "г",
+        minimum: 0,
+      });
+    }
+    const batch = crypto.randomUUID();
+    const stock = {
+      id: batch,
+      product_id: empty,
+      quantity: 10,
+      unit: "г",
+      purchased_on: day(),
+      reason: "Ручное добавление",
+    };
+    await mutate("batch_save", stock);
+    await mutate("batch_save", {
+      ...stock,
+      version: 1,
+      quantity: 0,
+      reason: "Списание",
+    });
+    await mutate("batch_save", {
+      ...stock,
+      id: crypto.randomUUID(),
+      product_id: stocked,
+      quantity: 25,
+    });
+    await page.goto("/products");
+    await page
+      .getByRole("button", { name: "Редактор продуктов", exact: true })
+      .click();
+    const editor = page.getByRole("region", {
+      name: "Редактор продуктов",
+      exact: true,
+    });
+    const card = (name: string) =>
+      editor
+        .locator("article")
+        .filter({ has: page.getByRole("heading", { name, exact: true }) });
+    await expect(
+      card("Рис с остатком").getByRole("button", {
+        name: "Удалить",
+        exact: true,
+      }),
+    ).toBeDisabled();
+    await card("Старая специя")
+      .getByRole("button", { name: "Редактировать", exact: true })
+      .click();
+    const modal = page.getByRole("dialog");
+    await modal
+      .getByLabel("Название продукта", { exact: true })
+      .fill("Новая специя");
+    await modal.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(card("Новая специя")).toBeVisible();
+    page.once("dialog", (d) => d.dismiss());
+    await card("Новая специя")
+      .getByRole("button", { name: "Удалить", exact: true })
+      .click();
+    await expect(card("Новая специя")).toBeVisible();
+    page.once("dialog", (d) => d.accept());
+    await card("Новая специя")
+      .getByRole("button", { name: "Удалить", exact: true })
+      .click();
+    await expect(card("Новая специя")).toHaveCount(0);
+    expect(
+      (
+        await b.query(
+          "select id from public.stock_movements where batch_id=$1",
+          [batch],
+        )
+      ).rows,
+    ).toHaveLength(2);
+    await page
+      .getByRole("button", { name: "Добавить запас", exact: true })
+      .click();
+    await expect(
+      modal
+        .getByRole("combobox", { name: "Какой продукт", exact: true })
+        .locator("option"),
+    ).not.toContainText(["Новая специя"]);
+    await modal.getByRole("button", { name: "Отмена", exact: true }).click();
+    await editor
+      .getByRole("combobox", { name: "Список продуктов", exact: true })
+      .selectOption("archived");
+    await expect(card("Новая специя")).toBeVisible();
+    await card("Новая специя")
+      .getByRole("button", { name: "Восстановить", exact: true })
+      .click();
+    await expect(card("Новая специя")).toHaveCount(0);
+    await editor
+      .getByRole("combobox", { name: "Список продуктов", exact: true })
+      .selectOption("active");
+    await editor
+      .getByRole("searchbox", {
+        name: "Поиск в редакторе продуктов",
+        exact: true,
+      })
+      .fill("новая");
+    await expect(editor.locator("article")).toHaveCount(1);
+    await expect(card("Новая специя")).toBeVisible();
+    await page.reload();
+    await page
+      .getByRole("button", { name: "Редактор продуктов", exact: true })
+      .click();
+    await expect(card("Новая специя")).toBeVisible();
+  } finally {
+    await b.close();
+  }
+});
+
+test("редактор продуктов недоступен ребёнку без права редактирования", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page, "child");
+  try {
+    await page.goto("/products");
+    await expect(
+      page.getByRole("heading", { name: "Мои продукты", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Редактор продуктов", exact: true }),
+    ).toHaveCount(0);
+  } finally {
+    await b.close();
+  }
+});

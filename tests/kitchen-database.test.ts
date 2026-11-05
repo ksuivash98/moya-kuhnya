@@ -983,3 +983,69 @@ test.each(["menu_clear", "cooking_clear"])(
     await user();
   },
 );
+
+test("удаление продукта сохраняет историю, запрещено с остатком и чужой семье; восстановление проверяет версию", async () => {
+  await user();
+  const id = crypto.randomUUID(),
+    batch = crypto.randomUUID();
+  const product = {
+    id,
+    name: "Продукт для удаления",
+    category: "Специи",
+    unit: "г",
+    minimum: 0,
+  };
+  await op("product_save", product);
+  const stock = {
+    id: batch,
+    product_id: id,
+    quantity: 5,
+    unit: "г",
+    purchased_on: "2099-01-01",
+    reason: "Ручное добавление",
+  };
+  await op("batch_save", stock);
+  await expect(
+    op("product_save", { ...product, version: 1, archived: true }),
+  ).rejects.toThrow("Сначала спишите");
+  await op("batch_save", {
+    ...stock,
+    version: 1,
+    quantity: 0,
+    reason: "Списание",
+  });
+  const key = crypto.randomUUID();
+  const deletion = { ...product, version: 1, archived: true };
+  await op("product_save", deletion, key);
+  await op("product_save", deletion, key);
+  expect(
+    await scalar("select archived from public.products where id=$1", [id]),
+  ).toBe(true);
+  expect(
+    Number(
+      await scalar(
+        "select count(*) from public.stock_movements where batch_id=$1",
+        [batch],
+      ),
+    ),
+  ).toBe(2);
+  expect(
+    Number(
+      await scalar("select quantity from public.stock_batches where id=$1", [
+        batch,
+      ]),
+    ),
+  ).toBe(0);
+  await user(other);
+  await expect(
+    op("product_save", { ...product, version: 2, archived: false }),
+  ).rejects.toThrow();
+  await user();
+  await expect(
+    op("product_save", { ...product, version: 1, archived: false }),
+  ).rejects.toThrow("изменён");
+  await op("product_save", { ...product, version: 2, archived: false });
+  expect(
+    await scalar("select archived from public.products where id=$1", [id]),
+  ).toBe(false);
+});

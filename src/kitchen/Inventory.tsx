@@ -19,6 +19,7 @@ import {
 import { mutate } from "./api";
 import { Photo, PhotoField } from "../recipes/Photos";
 import ProductPicker from "./ProductPicker";
+import ProductsEditor from "./ProductsEditor";
 export default function Inventory({
   kind,
   state,
@@ -31,6 +32,7 @@ export default function Inventory({
   const [params] = useSearchParams();
   const [layout, setLayout] = useListLayout(kind);
   const [category, setCategory] = useState("");
+  const [editor, setEditor] = useState(false);
   useEffect(() => {
     setCategory("");
     setFilter("");
@@ -438,6 +440,15 @@ export default function Inventory({
             {!prep && (
               <button
                 className="secondary"
+                onClick={() => setEditor((open) => !open)}
+                aria-expanded={editor}
+              >
+                Редактор продуктов
+              </button>
+            )}
+            {!prep && (
+              <button
+                className="secondary"
                 onClick={() => setDialog({ action: "product_save" })}
               >
                 Создать продукт
@@ -452,6 +463,23 @@ export default function Inventory({
           </>
         )}
       </div>
+      {!prep && canEdit && editor && (
+        <ProductsEditor
+          products={products}
+          batches={rows(state, "stock_batches")}
+          onClose={() => setEditor(false)}
+          onEdit={(row) => setDialog({ action: "product_save", row })}
+          onArchive={async (row, archived, key) => {
+            await mutate(family, "product_save", { ...row, archived }, key);
+            await reload();
+            notify(
+              archived
+                ? "Продукт удалён из списка. История сохранена."
+                : "Продукт восстановлен.",
+            );
+          }}
+        />
+      )}
       {!visible.length && (
         <div className="panel k-empty">
           {query || filter || category
