@@ -18,6 +18,7 @@ import {
 } from "./model";
 import { mutate } from "./api";
 import { Photo, PhotoField } from "../recipes/Photos";
+import ProductPicker from "./ProductPicker";
 export default function Inventory({
   kind,
   state,
@@ -39,6 +40,7 @@ export default function Inventory({
   const [photoBlob, setPhotoBlob] = useState<Blob | null | undefined>();
   const [photoPath, setPhotoPath] = useState("");
   const [photoBusy, setPhotoBusy] = useState(0);
+  const [productBusy, setProductBusy] = useState(false);
   const onPhotoBusy = useCallback(
     (n: number) => setPhotoBusy((v) => Math.max(0, v + n)),
     [],
@@ -227,8 +229,28 @@ export default function Inventory({
                 {
                   key: "product_id",
                   label: "Какой продукт",
-                  hint: "Выберите название из списка. Если нужного нет, закройте окно и нажмите «Создать продукт».",
+                  hint: dialog?.row
+                    ? "Для сохранённого запаса нельзя менять продукт. Новое название добавьте отдельным запасом."
+                    : "Найдите продукт по названию или создайте новый прямо в этом окне.",
                   options: productOptions,
+                  render: dialog?.row
+                    ? undefined
+                    : (initial) => (
+                        <ProductPicker
+                          options={productOptions}
+                          initial={String(initial ?? "")}
+                          onBusy={setProductBusy}
+                          onCreate={async (data, key) => {
+                            await mutate(
+                              family,
+                              "product_save",
+                              { ...data, minimum: 0, archived: false },
+                              key,
+                            );
+                            await reload();
+                          }}
+                        />
+                      ),
                   required: true,
                 },
                 {
@@ -409,7 +431,6 @@ export default function Inventory({
               onClick={() =>
                 setDialog({ action: prep ? "prep_save" : "batch_save" })
               }
-              disabled={!prep && !productOptions.length}
             >
               <Plus size={17} />
               {prep ? "Добавить заготовку" : "Добавить запас"}
@@ -625,7 +646,7 @@ export default function Inventory({
               : undefined
           }
           fields={fields}
-          externalBusy={photoBusy > 0}
+          externalBusy={photoBusy > 0 || productBusy}
           extra={
             prep && action === "prep_save" ? (
               <PhotoField
@@ -651,7 +672,7 @@ export default function Inventory({
             purchased_on: today(),
             prepared_on: today(),
             date: today(),
-            product_id: productOptions[0]?.value,
+            product_id: "",
             reason: prep
               ? "Использование"
               : dialog.row

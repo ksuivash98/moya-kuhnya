@@ -11,6 +11,7 @@ export type Field = {
   max?: number;
   step?: number;
   hint?: string;
+  render?: (initial: unknown) => ReactNode;
 };
 export default function Fields({
   title,
@@ -60,48 +61,52 @@ export default function Fields({
       <form onSubmit={submit} className="form-stack">
         <fieldset disabled={busy} className="k-fields">
           {extra}
-          {fields.map((f) => (
-            <label key={f.key}>
-              {f.label}
-              {f.type === "textarea" ? (
-                <textarea
-                  name={f.key}
-                  aria-label={f.label}
-                  aria-describedby={f.hint ? `${hintId}-${f.key}` : undefined}
-                  defaultValue={String(initialValue.current[f.key] ?? "")}
-                  maxLength={20000}
-                />
-              ) : f.options ? (
-                <select
-                  name={f.key}
-                  aria-label={f.label}
-                  aria-describedby={f.hint ? `${hintId}-${f.key}` : undefined}
-                  defaultValue={String(initialValue.current[f.key] ?? "")}
-                  required={f.required}
-                >
-                  {f.options.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  name={f.key}
-                  aria-label={f.label}
-                  aria-describedby={f.hint ? `${hintId}-${f.key}` : undefined}
-                  type={f.type ?? "text"}
-                  defaultValue={String(initialValue.current[f.key] ?? "")}
-                  required={f.required}
-                  min={f.min}
-                  max={f.max}
-                  step={f.step ?? (f.type === "number" ? 0.0001 : undefined)}
-                  maxLength={2000}
-                />
-              )}{" "}
-              {f.hint && <small id={`${hintId}-${f.key}`}>{f.hint}</small>}
-            </label>
-          ))}
+          {fields.map((f) =>
+            f.render ? (
+              <div key={f.key}>{f.render(initialValue.current[f.key])}</div>
+            ) : (
+              <label key={f.key}>
+                {f.label}
+                {f.type === "textarea" ? (
+                  <textarea
+                    name={f.key}
+                    aria-label={f.label}
+                    aria-describedby={f.hint ? `${hintId}-${f.key}` : undefined}
+                    defaultValue={String(initialValue.current[f.key] ?? "")}
+                    maxLength={20000}
+                  />
+                ) : f.options ? (
+                  <select
+                    name={f.key}
+                    aria-label={f.label}
+                    aria-describedby={f.hint ? `${hintId}-${f.key}` : undefined}
+                    defaultValue={String(initialValue.current[f.key] ?? "")}
+                    required={f.required}
+                  >
+                    {f.options.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    name={f.key}
+                    aria-label={f.label}
+                    aria-describedby={f.hint ? `${hintId}-${f.key}` : undefined}
+                    type={f.type ?? "text"}
+                    defaultValue={String(initialValue.current[f.key] ?? "")}
+                    required={f.required}
+                    min={f.min}
+                    max={f.max}
+                    step={f.step ?? (f.type === "number" ? 0.0001 : undefined)}
+                    maxLength={2000}
+                  />
+                )}{" "}
+                {f.hint && <small id={`${hintId}-${f.key}`}>{f.hint}</small>}
+              </label>
+            ),
+          )}
         </fieldset>
         {error && (
           <p className="error" role="alert">
