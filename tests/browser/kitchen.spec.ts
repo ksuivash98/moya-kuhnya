@@ -1,5 +1,121 @@
 import { test, expect } from "@playwright/test";
 import { recipeBackend } from "../support/recipe-backend";
+
+test("ИИ-меню: правка порций и приёма пищи, проверка дат и неизменный режим результата", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const recipe = await b.save("Блюдо для предложения");
+    await page.route("**/rest/v1/family_preferences*", (route) =>
+      route.fulfill({ json: null }),
+    );
+    let applied: Record<string, unknown> | undefined;
+    let period: { from: string; to: string };
+    await page.route("**/functions/v1/kitchen-assistant", async (route) => {
+      const { input } = route.request().postDataJSON();
+      period = input;
+      await route.fulfill({
+        json: {
+          id: crypto.randomUUID(),
+          result: {
+            summary: "Предложенное меню",
+            items: [
+              {
+                recipe_id: recipe.id,
+                date: input.from,
+                meal: "Обед",
+                servings: 4,
+                reason: "Проверить перед сохранением",
+              },
+            ],
+          },
+        },
+      });
+    });
+    await page.route("**/rest/v1/rpc/apply_ai_menu", async (route) => {
+      applied = route.request().postDataJSON();
+      await route.fulfill({ json: [] });
+    });
+    await page.goto("/assistant");
+    page.on("dialog", (dialog) => dialog.accept());
+    await page
+      .getByRole("combobox", { name: "Задача", exact: true })
+      .selectOption("menu");
+    await page
+      .getByRole("button", {
+        name: "Запросить ИИ (внешний сервис)",
+        exact: true,
+      })
+      .click();
+    const apply = page.getByRole("button", {
+      name: "Подтвердить добавление в меню",
+      exact: true,
+    });
+    await expect(apply).toBeEnabled();
+    // Изменение следующего запроса не превращает уже готовое меню в совет.
+    await page
+      .getByRole("combobox", { name: "Задача", exact: true })
+      .selectOption("recommend");
+    await page
+      .getByRole("combobox", { name: "Приём пищи", exact: true })
+      .selectOption("Ужин");
+    await page.getByLabel("Порции", { exact: true }).fill("");
+    await expect(apply).toBeDisabled();
+    await expect(page.getByRole("alert")).toContainText(
+      "целое количество порций",
+    );
+    await page.getByLabel("Порции", { exact: true }).fill("6");
+    await page.getByLabel("Дата", { exact: true }).fill("2000-01-01");
+    await expect(apply).toBeDisabled();
+    expect(applied).toBeUndefined();
+    await page.getByLabel("Дата", { exact: true }).fill(period!.to);
+    await expect(apply).toBeEnabled();
+    await apply.click();
+    await expect(apply).toHaveCount(0);
+    expect(applied).toMatchObject({
+      p_family: b.family,
+      p_items: [
+        { recipe_id: recipe.id, date: period!.to, meal: "Ужин", servings: 6 },
+      ],
+    });
+
+    await page
+      .getByRole("combobox", { name: "Задача", exact: true })
+      .selectOption("menu");
+    await page
+      .getByRole("button", {
+        name: "Запросить ИИ (внешний сервис)",
+        exact: true,
+      })
+      .click();
+    await expect(apply).toBeEnabled();
+    await page
+      .getByRole("button", { name: "Удалить предложение", exact: true })
+      .click();
+    await expect(apply).toBeDisabled();
+    await expect(page.getByRole("alert")).toContainText("хотя бы одно блюдо");
+    await page
+      .getByRole("combobox", { name: "Задача", exact: true })
+      .selectOption("recommend");
+    await page
+      .getByRole("button", {
+        name: "Запросить ИИ (внешний сервис)",
+        exact: true,
+      })
+      .click();
+    await expect(
+      page.getByText("Предложенное меню", { exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("combobox", { name: "Задача", exact: true })
+      .selectOption("menu");
+    await expect(apply).toHaveCount(0);
+  } finally {
+    await b.close();
+  }
+});
+
 test.setTimeout(90000);
 const day = () =>
   new Intl.DateTimeFormat("en-CA", {

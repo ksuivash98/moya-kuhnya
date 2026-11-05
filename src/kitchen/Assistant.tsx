@@ -2,6 +2,7 @@ import LayoutToggle, { useListLayout } from "../components/ListLayout";
 import { useEffect, useState } from "react";
 import { client, check, errorText } from "../supabase";
 import type { ModuleProps } from "./KitchenPage";
+import { menuError, type Proposal } from "./assistant-menu";
 import {
   type Row,
   type Json,
@@ -10,14 +11,8 @@ import {
   fmt,
   rows,
   monthRange,
+  meals,
 } from "./model";
-type Proposal = {
-  recipe_id: string;
-  date: string;
-  meal: string;
-  servings: number;
-  reason: string;
-};
 export default function Assistant({
   state,
   recipes,
@@ -25,6 +20,7 @@ export default function Assistant({
   month,
   reload,
   notify,
+  canEdit,
 }: ModuleProps) {
   const [layout, setLayout] = useListLayout("assistant");
   const [prefs, setPrefs] = useState({
@@ -42,9 +38,21 @@ export default function Assistant({
       id: string;
       summary: string;
       items: Proposal[];
+      mode: string;
+      from: string;
+      to: string;
     } | null>(null),
     [include, setInclude] = useState(false),
     [count, setCount] = useState(20);
+  const validation =
+    result?.mode === "menu"
+      ? menuError(
+          result.items,
+          new Set(recipes.map((r) => r.id)),
+          result.from,
+          result.to,
+        )
+      : "";
   useEffect(() => {
     let alive = true;
     void client()
@@ -208,8 +216,8 @@ export default function Assistant({
         <p className="notice">
           Требуется отдельное развёртывание Edge Function и разрешение владельца
           на платного провайдера. Ключ хранится только на сервере. До настройки
-          ИИ-запросы не выполняются; импорт рецептов из файлов и ссылок пока не
-          реализован.
+          ИИ-запросы не выполняются. Импорт фото и текста доступен в книге
+          рецептов; импорт видео и ссылок пока не реализован.
         </p>
         <form
           className="form-stack"
@@ -249,7 +257,13 @@ export default function Assistant({
                 }
                 throw new Error(message);
               }
-              setResult({ id: response.data.id, ...response.data.result });
+              setResult({
+                id: response.data.id,
+                ...response.data.result,
+                mode,
+                from: input.from,
+                to: input.to,
+              });
             } catch (err) {
               setError(errorText(err));
             } finally {
@@ -310,17 +324,19 @@ export default function Assistant({
                       "Рекомендация"}
                   </strong>
                   <p>{p.reason}</p>
-                  {mode === "menu" && (
+                  {result.mode === "menu" && (
                     <p>
                       {p.meal} · {p.servings} порц.
                     </p>
                   )}
-                  {mode === "menu" && (
+                  {result.mode === "menu" && (
                     <div className="form-grid">
                       <label>
                         Дата
                         <input
                           type="date"
+                          min={result.from}
+                          max={result.to}
                           value={p.date}
                           onChange={(e) =>
                             setResult(
@@ -362,6 +378,51 @@ export default function Assistant({
                           ))}
                         </select>
                       </label>
+                      <label>
+                        Приём пищи
+                        <select
+                          value={p.meal}
+                          onChange={(e) =>
+                            setResult(
+                              (r) =>
+                                r && {
+                                  ...r,
+                                  items: r.items.map((x, n) =>
+                                    n === i
+                                      ? { ...x, meal: e.target.value }
+                                      : x,
+                                  ),
+                                },
+                            )
+                          }
+                        >
+                          {meals.map((meal) => (
+                            <option key={meal}>{meal}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Порции
+                        <input
+                          type="number"
+                          min={1}
+                          max={1000}
+                          step={1}
+                          value={Number.isFinite(p.servings) ? p.servings : ""}
+                          onChange={(e) => {
+                            const servings = e.target.valueAsNumber;
+                            setResult(
+                              (r) =>
+                                r && {
+                                  ...r,
+                                  items: r.items.map((x, n) =>
+                                    n === i ? { ...x, servings } : x,
+                                  ),
+                                },
+                            );
+                          }}
+                        />
+                      </label>
                     </div>
                   )}
                   <button
@@ -381,11 +442,17 @@ export default function Assistant({
                 </div>
               ))}
             </div>
-            {mode === "menu" && (
+            {validation && (
+              <p role="alert" className="error">
+                {validation}
+              </p>
+            )}
+            {result.mode === "menu" && (
               <button
                 className="primary"
-                disabled={busy}
+                disabled={busy || !!validation || !canEdit || !navigator.onLine}
                 onClick={async () => {
+                  if (validation || !canEdit) return;
                   if (!confirm("Добавить показанные блюда в семейное меню?"))
                     return;
                   setBusy(true);
