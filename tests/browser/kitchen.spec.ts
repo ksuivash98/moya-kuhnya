@@ -124,6 +124,176 @@ const day = () =>
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
+test("добавить запас: поиск продукта и создание в том же окне с сохранением заполненных полей", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    for (const name of ["Рис", "Паприка копчёная"]) {
+      await b.query("select public.kitchen_mutate($1,$2,'product_save',$3)", [
+        b.family,
+        crypto.randomUUID(),
+        {
+          id: crypto.randomUUID(),
+          name,
+          category: "Специи",
+          unit: "г",
+          minimum: 0,
+        },
+      ]);
+    }
+    await page.goto("/products");
+    await page
+      .getByRole("button", { name: "Добавить запас", exact: true })
+      .click();
+    const modal = page.getByRole("dialog");
+    const picker = modal.getByRole("combobox", {
+      name: "Какой продукт",
+      exact: true,
+    });
+    await modal
+      .getByLabel("Сколько есть в этой упаковке", { exact: true })
+      .fill("25");
+    await modal.getByLabel("Годен до", { exact: true }).fill("2099-01-01");
+    await modal
+      .getByLabel("Где хранится", { exact: true })
+      .selectOption({ label: "Кухонный шкаф" });
+    await modal
+      .getByRole("searchbox", { name: "Поиск продукта", exact: true })
+      .fill("ПАПРИ");
+    await expect(picker.locator("option")).toHaveText([
+      "Выберите продукт",
+      "Паприка копчёная",
+    ]);
+    await picker.selectOption({ label: "Паприка копчёная" });
+    await modal
+      .getByRole("searchbox", { name: "Поиск продукта", exact: true })
+      .fill("Куркума");
+    await expect(picker).toHaveValue("");
+    await expect(modal).toContainText("Продукт не найден");
+    await modal
+      .getByRole("button", { name: "Создать новый продукт", exact: true })
+      .click();
+    await expect(
+      modal.getByLabel("Название нового продукта", { exact: true }),
+    ).toHaveValue("Куркума");
+    await modal
+      .getByRole("combobox", { name: "Категория нового продукта", exact: true })
+      .selectOption("Специи");
+    // Ошибка создания не закрывает окно и не стирает данные запаса.
+    let failed = false;
+    const attempts: Record<string, unknown>[] = [];
+    await page.route("**/rest/v1/rpc/kitchen_mutate", async (route) => {
+      const body = route.request().postDataJSON();
+      if (body.p_action === "product_save") {
+        attempts.push(body);
+        if (!failed) {
+          failed = true;
+          await route.fulfill({
+            status: 503,
+            json: { message: "Временная ошибка создания" },
+          });
+          return;
+        }
+      }
+      await route.fallback();
+    });
+    await modal
+      .getByRole("button", { name: "Создать и выбрать", exact: true })
+      .click();
+    await expect(modal.getByRole("alert")).toContainText(
+      "Временная ошибка создания",
+    );
+    await expect(
+      modal.getByLabel("Сколько есть в этой упаковке", { exact: true }),
+    ).toHaveValue("25");
+    await modal
+      .getByRole("button", { name: "Создать и выбрать", exact: true })
+      .click();
+    await expect(
+      modal.getByRole("region", { name: "Новый продукт", exact: true }),
+    ).toHaveCount(0);
+    await expect(picker.locator("option:checked")).toHaveText("Куркума");
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]).toEqual(attempts[0]);
+    expect(
+      (await b.query("select id from public.stock_batches")).rows,
+    ).toHaveLength(0);
+    await expect(modal.getByLabel("Годен до", { exact: true })).toHaveValue(
+      "2099-01-01",
+    );
+    await expect(
+      modal
+        .getByLabel("Где хранится", { exact: true })
+        .locator("option:checked"),
+    ).toHaveText("Кухонный шкаф");
+    await modal.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(modal).toHaveCount(0);
+    const saved = await b.query<{ name: string; quantity: number }>(
+      "select p.name,b.quantity from public.stock_batches b join public.products p on p.id=b.product_id",
+    );
+    expect(saved.rows).toHaveLength(1);
+    expect(saved.rows[0].name).toBe("Куркума");
+    expect(Number(saved.rows[0].quantity)).toBe(25);
+    await page
+      .getByRole("button", { name: "Добавить запас", exact: true })
+      .click();
+    await modal
+      .getByRole("searchbox", { name: "Поиск продукта", exact: true })
+      .fill("папри");
+    await picker.selectOption({ label: "Паприка копчёная" });
+    await modal
+      .getByLabel("Сколько есть в этой упаковке", { exact: true })
+      .fill("10");
+    await modal.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(modal).toHaveCount(0);
+    expect((await b.query("select id from public.products")).rows).toHaveLength(
+      3,
+    );
+    expect(
+      (await b.query("select id from public.stock_batches")).rows,
+    ).toHaveLength(2);
+  } finally {
+    await b.close();
+  }
+});
+
+test("добавить запас: первый продукт создаётся без выхода из пустого справочника", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    await page.goto("/products");
+    await page
+      .getByRole("button", { name: "Добавить запас", exact: true })
+      .click();
+    const modal = page.getByRole("dialog");
+    await modal
+      .getByRole("button", { name: "Создать новый продукт", exact: true })
+      .click();
+    await modal
+      .getByLabel("Название нового продукта", { exact: true })
+      .fill("Овсяные хлопья");
+    await modal
+      .getByRole("button", { name: "Создать и выбрать", exact: true })
+      .click();
+    await expect(
+      modal
+        .getByRole("combobox", { name: "Какой продукт", exact: true })
+        .locator("option:checked"),
+    ).toHaveText("Овсяные хлопья");
+    await modal.getByRole("button", { name: "Отмена", exact: true }).click();
+    expect((await b.query("select id from public.products")).rows).toHaveLength(
+      1,
+    );
+    expect(
+      (await b.query("select id from public.stock_batches")).rows,
+    ).toHaveLength(0);
+  } finally {
+    await b.close();
+  }
+});
+
 test("единая кухня: меню → покупка → запасы → готовка → заморозка → частичное использование", async ({
   page,
 }) => {
@@ -684,7 +854,7 @@ test("мои продукты: понятный путь от названия �
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Добавить запас", exact: true }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     await page
       .getByRole("button", { name: "Создать продукт", exact: true })
       .click();
@@ -711,6 +881,9 @@ test("мои продукты: понятный путь от названия �
       .getByRole("button", { name: "Добавить запас", exact: true })
       .click();
     modal = page.getByRole("dialog");
+    await modal
+      .getByRole("combobox", { name: "Какой продукт", exact: true })
+      .selectOption({ label: "Рис" });
     await modal
       .getByLabel("Сколько есть в этой упаковке", { exact: true })
       .fill("0.5");
@@ -1503,6 +1676,154 @@ test("строки запасов: горизонтальные колонки �
     await expect(
       page.getByRole("dialog").getByLabel("Сколько осталось", { exact: true }),
     ).toHaveValue("22");
+  } finally {
+    await b.close();
+  }
+});
+
+test("редактор продуктов: правка без запасов, подтверждение удаления, история и восстановление", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const empty = crypto.randomUUID(),
+      stocked = crypto.randomUUID();
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    for (const [id, name] of [
+      [empty, "Старая специя"],
+      [stocked, "Рис с остатком"],
+    ]) {
+      await mutate("product_save", {
+        id,
+        name,
+        category: "Специи",
+        unit: "г",
+        minimum: 0,
+      });
+    }
+    const batch = crypto.randomUUID();
+    const stock = {
+      id: batch,
+      product_id: empty,
+      quantity: 10,
+      unit: "г",
+      purchased_on: day(),
+      reason: "Ручное добавление",
+    };
+    await mutate("batch_save", stock);
+    await mutate("batch_save", {
+      ...stock,
+      version: 1,
+      quantity: 0,
+      reason: "Списание",
+    });
+    await mutate("batch_save", {
+      ...stock,
+      id: crypto.randomUUID(),
+      product_id: stocked,
+      quantity: 25,
+    });
+    await page.goto("/products");
+    await page
+      .getByRole("button", { name: "Редактор продуктов", exact: true })
+      .click();
+    const editor = page.getByRole("region", {
+      name: "Редактор продуктов",
+      exact: true,
+    });
+    const card = (name: string) =>
+      editor
+        .locator("article")
+        .filter({ has: page.getByRole("heading", { name, exact: true }) });
+    await expect(
+      card("Рис с остатком").getByRole("button", {
+        name: "Удалить",
+        exact: true,
+      }),
+    ).toBeDisabled();
+    await card("Старая специя")
+      .getByRole("button", { name: "Редактировать", exact: true })
+      .click();
+    const modal = page.getByRole("dialog");
+    await modal
+      .getByLabel("Название продукта", { exact: true })
+      .fill("Новая специя");
+    await modal.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(card("Новая специя")).toBeVisible();
+    page.once("dialog", (d) => d.dismiss());
+    await card("Новая специя")
+      .getByRole("button", { name: "Удалить", exact: true })
+      .click();
+    await expect(card("Новая специя")).toBeVisible();
+    page.once("dialog", (d) => d.accept());
+    await card("Новая специя")
+      .getByRole("button", { name: "Удалить", exact: true })
+      .click();
+    await expect(card("Новая специя")).toHaveCount(0);
+    expect(
+      (
+        await b.query(
+          "select id from public.stock_movements where batch_id=$1",
+          [batch],
+        )
+      ).rows,
+    ).toHaveLength(2);
+    await page
+      .getByRole("button", { name: "Добавить запас", exact: true })
+      .click();
+    await expect(
+      modal
+        .getByRole("combobox", { name: "Какой продукт", exact: true })
+        .locator("option"),
+    ).not.toContainText(["Новая специя"]);
+    await modal.getByRole("button", { name: "Отмена", exact: true }).click();
+    await editor
+      .getByRole("combobox", { name: "Список продуктов", exact: true })
+      .selectOption("archived");
+    await expect(card("Новая специя")).toBeVisible();
+    await card("Новая специя")
+      .getByRole("button", { name: "Восстановить", exact: true })
+      .click();
+    await expect(card("Новая специя")).toHaveCount(0);
+    await editor
+      .getByRole("combobox", { name: "Список продуктов", exact: true })
+      .selectOption("active");
+    await editor
+      .getByRole("searchbox", {
+        name: "Поиск в редакторе продуктов",
+        exact: true,
+      })
+      .fill("новая");
+    await expect(editor.locator("article")).toHaveCount(1);
+    await expect(card("Новая специя")).toBeVisible();
+    await page.reload();
+    await page
+      .getByRole("button", { name: "Редактор продуктов", exact: true })
+      .click();
+    await expect(card("Новая специя")).toBeVisible();
+  } finally {
+    await b.close();
+  }
+});
+
+test("редактор продуктов недоступен ребёнку без права редактирования", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page, "child");
+  try {
+    await page.goto("/products");
+    await expect(
+      page.getByRole("heading", { name: "Мои продукты", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Редактор продуктов", exact: true }),
+    ).toHaveCount(0);
   } finally {
     await b.close();
   }

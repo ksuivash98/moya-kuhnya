@@ -18,6 +18,8 @@ import {
 } from "./model";
 import { mutate } from "./api";
 import { Photo, PhotoField } from "../recipes/Photos";
+import ProductPicker from "./ProductPicker";
+import ProductsEditor from "./ProductsEditor";
 export default function Inventory({
   kind,
   state,
@@ -30,6 +32,7 @@ export default function Inventory({
   const [params] = useSearchParams();
   const [layout, setLayout] = useListLayout(kind);
   const [category, setCategory] = useState("");
+  const [editor, setEditor] = useState(false);
   useEffect(() => {
     setCategory("");
     setFilter("");
@@ -39,6 +42,7 @@ export default function Inventory({
   const [photoBlob, setPhotoBlob] = useState<Blob | null | undefined>();
   const [photoPath, setPhotoPath] = useState("");
   const [photoBusy, setPhotoBusy] = useState(0);
+  const [productBusy, setProductBusy] = useState(false);
   const onPhotoBusy = useCallback(
     (n: number) => setPhotoBusy((v) => Math.max(0, v + n)),
     [],
@@ -227,8 +231,28 @@ export default function Inventory({
                 {
                   key: "product_id",
                   label: "Какой продукт",
-                  hint: "Выберите название из списка. Если нужного нет, закройте окно и нажмите «Создать продукт».",
+                  hint: dialog?.row
+                    ? "Для сохранённого запаса нельзя менять продукт. Новое название добавьте отдельным запасом."
+                    : "Найдите продукт по названию или создайте новый прямо в этом окне.",
                   options: productOptions,
+                  render: dialog?.row
+                    ? undefined
+                    : (initial) => (
+                        <ProductPicker
+                          options={productOptions}
+                          initial={String(initial ?? "")}
+                          onBusy={setProductBusy}
+                          onCreate={async (data, key) => {
+                            await mutate(
+                              family,
+                              "product_save",
+                              { ...data, minimum: 0, archived: false },
+                              key,
+                            );
+                            await reload();
+                          }}
+                        />
+                      ),
                   required: true,
                 },
                 {
@@ -409,11 +433,19 @@ export default function Inventory({
               onClick={() =>
                 setDialog({ action: prep ? "prep_save" : "batch_save" })
               }
-              disabled={!prep && !productOptions.length}
             >
               <Plus size={17} />
               {prep ? "Добавить заготовку" : "Добавить запас"}
             </button>
+            {!prep && (
+              <button
+                className="secondary"
+                onClick={() => setEditor((open) => !open)}
+                aria-expanded={editor}
+              >
+                Редактор продуктов
+              </button>
+            )}
             {!prep && (
               <button
                 className="secondary"
@@ -431,6 +463,23 @@ export default function Inventory({
           </>
         )}
       </div>
+      {!prep && canEdit && editor && (
+        <ProductsEditor
+          products={products}
+          batches={rows(state, "stock_batches")}
+          onClose={() => setEditor(false)}
+          onEdit={(row) => setDialog({ action: "product_save", row })}
+          onArchive={async (row, archived, key) => {
+            await mutate(family, "product_save", { ...row, archived }, key);
+            await reload();
+            notify(
+              archived
+                ? "Продукт удалён из списка. История сохранена."
+                : "Продукт восстановлен.",
+            );
+          }}
+        />
+      )}
       {!visible.length && (
         <div className="panel k-empty">
           {query || filter || category
@@ -440,7 +489,9 @@ export default function Inventory({
               : "Запасов пока нет. Нажмите «Создать продукт», если названия ещё нет в списке, затем «Добавить запас» и укажите количество."}
         </div>
       )}
-      <div className={`k-list list-layout list-layout--${layout}`}>
+      <div
+        className={`k-list ${prep ? "" : "products-grid"} list-layout list-layout--${layout}`}
+      >
         {visible.slice(page * perPage, (page + 1) * perPage).map((r) => (
           <article
             className={`k-item inventory-item ${prep ? "inventory-item--photo" : ""}`}
@@ -623,7 +674,7 @@ export default function Inventory({
               : undefined
           }
           fields={fields}
-          externalBusy={photoBusy > 0}
+          externalBusy={photoBusy > 0 || productBusy}
           extra={
             prep && action === "prep_save" ? (
               <PhotoField
@@ -649,7 +700,7 @@ export default function Inventory({
             purchased_on: today(),
             prepared_on: today(),
             date: today(),
-            product_id: productOptions[0]?.value,
+            product_id: "",
             reason: prep
               ? "Использование"
               : dialog.row
