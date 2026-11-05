@@ -109,6 +109,20 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
 }
+@media (min-width: 1200px) {
+  .products-grid.list-layout--grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .products-grid.list-layout--grid > .inventory-item {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+@media (min-width: 1600px) {
+  .products-grid.list-layout--grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
 .k-section {
   margin-top: 24px;
 }

@@ -440,7 +440,9 @@ export default function Inventory({
               : "Запасов пока нет. Нажмите «Создать продукт», если названия ещё нет в списке, затем «Добавить запас» и укажите количество."}
         </div>
       )}
-      <div className={`k-list list-layout list-layout--${layout}`}>
+      <div
+        className={`k-list ${prep ? "" : "products-grid"} list-layout list-layout--${layout}`}
+      >
         {visible.slice(page * perPage, (page + 1) * perPage).map((r) => (
           <article
             className={`k-item inventory-item ${prep ? "inventory-item--photo" : ""}`}
