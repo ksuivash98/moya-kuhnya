@@ -1885,6 +1885,9 @@ for (const kind of ["menu", "cooking"])
           status,
         });
       await page.goto("/" + kind);
+      await expect(
+        page.getByRole("button", { name: "Добавить блюдо", exact: true }),
+      ).toBeEnabled();
       await page.getByLabel("Месяц", { exact: true }).fill("2030-04");
       const panel = page.locator("section.panel").filter({
         has: page.getByRole("heading", {

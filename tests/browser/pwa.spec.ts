@@ -1,4 +1,71 @@
 import { expect, test } from "@playwright/test";
+import { readFile, writeFile } from "node:fs/promises";
+test.describe.configure({ mode: "serial" });
+
+test("production PWA: открытая вкладка получает обновление после закрытия формы", async ({
+  page,
+}) => {
+  const original = await readFile("dist/sw.js", "utf8");
+  try {
+    await page.goto("/");
+    await page.evaluate(async () => {
+      await navigator.serviceWorker.ready;
+    });
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          async () => (await navigator.serviceWorker.ready).updateViaCache,
+        ),
+      )
+      .toBe("none");
+    await page.evaluate(async () => {
+      await (await navigator.serviceWorker.ready).update();
+      const state = window as unknown as Record<string, unknown>;
+      state.shellUpdateMarker = true;
+      const dialog = document.createElement("dialog");
+      dialog.id = "update-test-form";
+      dialog.innerHTML = '<form><input value="несохранённые данные"></form>';
+      document.body.append(dialog);
+      dialog.showModal();
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        state.shellControllerChanged = true;
+      });
+    });
+    await writeFile(
+      "dist/sw.js",
+      original + `\n// Update regression ${Date.now()}\n`,
+    );
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.waitForFunction(
+      () =>
+        (window as unknown as Record<string, unknown>)
+          .shellControllerChanged === true,
+    );
+    await expect(page.locator("#update-test-form input")).toHaveValue(
+      "несохранённые данные",
+    );
+    expect(
+      await page.evaluate(
+        () => (window as unknown as Record<string, unknown>).shellUpdateMarker,
+      ),
+    ).toBe(true);
+    await page.evaluate(() =>
+      document.getElementById("update-test-form")!.remove(),
+    );
+    await page.waitForFunction(
+      () => !(window as unknown as Record<string, unknown>).shellUpdateMarker,
+    );
+    await expect(
+      page.getByRole("heading", {
+        name: /^Добро пожаловать домой/,
+      }),
+    ).toBeVisible();
+  } finally {
+    await writeFile("dist/sw.js", original);
+  }
+});
+
 test("production PWA: manifest, service worker и оболочка офлайн", async ({
   page,
   context,
