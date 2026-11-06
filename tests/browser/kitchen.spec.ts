@@ -3165,3 +3165,177 @@ test("автопересчёт соли: ложки в граммы, ручна�
     await b.close();
   }
 });
+
+test("другая заготовка: выбор доступен, замена подтверждается и сохраняется вместе с коэффициентом", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const recipe = await b.save("Блюдо с заменой ингредиента");
+    await b.query("select public.save_recipe($1,$2,$3,$4)", [
+      recipe.id,
+      b.family,
+      {
+        ...recipe.data,
+        servings: 4,
+        ingredients: [
+          {
+            id: crypto.randomUUID(),
+            name: "Картофель",
+            amount: "300",
+            unit: "г",
+          },
+        ],
+      },
+      1,
+    ]);
+    const prep = crypto.randomUUID(),
+      menu = crypto.randomUUID();
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    await mutate("prep_save", {
+      id: prep,
+      title: "Куриный суп с яичной лапшой на готовом бульоне",
+      quantity: 2,
+      unit: "порц.",
+      prepared_on: day(),
+      expires_on: "2099-01-01",
+    });
+    await mutate("menu_save", {
+      id: menu,
+      recipe_id: recipe.id,
+      month: day().slice(0, 7) + "-01",
+      date: day(),
+      meal: "Обед",
+      servings: 4,
+      planned_count: 1,
+      status: "Запланировано",
+    });
+    await page.goto("/menu");
+    const panel = page
+      .locator("section.panel")
+      .filter({
+        has: page.getByRole("heading", {
+          name: "Ингредиенты плана",
+          exact: true,
+        }),
+      });
+    await expect(panel.locator("tbody tr td").last()).toHaveText("300 г");
+    await panel
+      .getByRole("button", { name: "Подобрать все продукты", exact: true })
+      .click();
+    const bulk = page.getByRole("region", {
+      name: "Общий подбор продуктов",
+      exact: true,
+    });
+    const picker = bulk.getByRole("combobox", {
+      name: "Источник для Картофель (г)",
+      exact: true,
+    });
+    await expect(picker).toHaveValue("");
+    await expect(
+      picker.locator(`option[value="preparation:${prep}"]`),
+    ).toBeEnabled();
+    await picker.selectOption(`preparation:${prep}`);
+    const apply = bulk.getByRole("button", { name: /^Применить подбор/ });
+    await expect(apply).toBeDisabled();
+    const confirmation = bulk.getByRole("checkbox", {
+      name: "Подтверждаю замену ингредиента «Картофель» этой заготовкой",
+      exact: true,
+    });
+    await confirmation.check();
+    await expect(apply).toBeDisabled();
+    await bulk
+      .getByRole("spinbutton", {
+        name: "Сколько г в 1 порц.: Картофель",
+        exact: true,
+      })
+      .fill("300");
+    await expect(confirmation).toBeChecked();
+    await expect(apply).toBeEnabled();
+    await apply.click();
+    await expect(panel.locator("tbody tr td").last()).toHaveText("0 г");
+    expect(
+      Number(
+        (
+          await b.query<{ quantity: string }>(
+            "select quantity from public.preparations where id=$1",
+            [prep],
+          )
+        ).rows[0].quantity,
+      ),
+    ).toBe(2);
+    await page.reload();
+    await panel.locator("summary").click();
+    await expect(
+      panel.getByRole("checkbox", {
+        name: "Подтверждаю замену ингредиента «Картофель» этой заготовкой",
+        exact: true,
+      }),
+    ).toBeChecked();
+    await expect(
+      panel.getByRole("spinbutton", {
+        name: "Сколько г в 1 порц.: Картофель",
+        exact: true,
+      }),
+    ).toHaveValue("300");
+    await page
+      .locator(".k-calendar")
+      .getByRole("button", {
+        name: "Действия: Блюдо с заменой ингредиента",
+        exact: true,
+      })
+      .click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Подтвердить готовку", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog", {
+      name: "Что сделано с приготовленным блюдом?",
+      exact: true,
+    });
+    await expect(
+      dialog.getByRole("checkbox", {
+        name: "Подтверждаю замену ингредиента «Картофель» этой заготовкой",
+        exact: true,
+      }),
+    ).toBeChecked();
+    await expect(dialog).toContainText(
+      "Будет списано: заготовка «Куриный суп с яичной лапшой на готовом бульоне» — 1 порц.",
+    );
+    await dialog
+      .getByRole("checkbox", {
+        name: "Подтверждаю расход и распределение порций",
+        exact: true,
+      })
+      .check();
+    await dialog
+      .getByRole("button", { name: "Подтвердить приготовление", exact: true })
+      .click();
+    await expect(dialog).not.toBeVisible();
+    expect(
+      Number(
+        (
+          await b.query<{ quantity: string }>(
+            "select quantity from public.preparations where id=$1",
+            [prep],
+          )
+        ).rows[0].quantity,
+      ),
+    ).toBe(1);
+    expect(
+      (
+        await b.query("select id from public.cooking_events where menu_id=$1", [
+          menu,
+        ])
+      ).rows,
+    ).toHaveLength(1);
+  } finally {
+    await b.close();
+  }
+});

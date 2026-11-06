@@ -309,3 +309,56 @@ test("общий подбор находит единственный проду
   );
   expect(proposals[0].choice).toEqual({ sourceId: "milk" });
 });
+
+test("другая заготовка учитывается только после явного подтверждения замены", () => {
+  const potato = need("Картофель", 300, "г");
+  const soup = source("Куриный суп с лапшой", 400, "г", "preparation", "soup");
+  expect(automaticMatch(potato, soup)).toBe(false);
+  expect(matchIngredients([potato], [soup], {})[0].missing).toBe(300);
+  const unconfirmed = { [ingredientKey(potato)]: { sourceId: "soup" } };
+  expect(
+    matchIngredients([potato], [soup], unconfirmed)[0].sourceMismatch,
+  ).toBe(true);
+  const confirmed = {
+    [ingredientKey(potato)]: {
+      sourceId: "soup",
+      allowPreparationSubstitution: true,
+    },
+  };
+  const matched = matchIngredients([potato, potato], [soup], confirmed);
+  expect(matched[0].missing).toBe(0);
+  expect(matched[0].sourceMismatch).toBe(false);
+  expect(matched[1].missing).toBe(200);
+  expect(bulkIngredientSuggestions([matched[0]], [soup], confirmed)).toEqual(
+    [],
+  );
+});
+test("подтверждение замены заготовкой не отменяет коэффициент единиц и не действует для продукта", () => {
+  const potato = need("Картофель", 300, "г"),
+    soup = source("Куриный суп", 2, "порц.", "preparation", "soup");
+  const choice = { sourceId: "soup", allowPreparationSubstitution: true };
+  expect(
+    matchIngredients([potato], [soup], { [ingredientKey(potato)]: choice })[0]
+      .conversionRequired,
+  ).toBe(true);
+  expect(
+    matchIngredients([potato], [soup], {
+      [ingredientKey(potato)]: { ...choice, ratio: 300 },
+    })[0].missing,
+  ).toBe(0);
+  const meat = need("Отварное куриное мясо"),
+    raw = source("Курица", 500, "г", "product", "raw");
+  expect(
+    matchIngredients([meat], [raw], {
+      [ingredientKey(meat)]: {
+        sourceId: "raw",
+        allowPreparationSubstitution: true,
+      },
+    })[0].sourceMismatch,
+  ).toBe(true);
+  const conflicting = {
+    "картошка|г": choice,
+    "картофель|г": { sourceId: "soup" },
+  };
+  expect(ingredientChoice(conflicting, need("Картофеля"))).toBeUndefined();
+});

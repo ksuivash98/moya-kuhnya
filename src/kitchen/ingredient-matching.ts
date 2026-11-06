@@ -85,7 +85,11 @@ export type InventorySource = {
   unit: string;
   expires: string;
 };
-export type IngredientChoice = { sourceId: string; ratio?: number };
+export type IngredientChoice = {
+  sourceId: string;
+  ratio?: number;
+  allowPreparationSubstitution?: boolean;
+};
 export type IngredientChoices = Record<string, IngredientChoice>;
 export const ingredientKey = (need: Need) =>
   `${need.name.trim().toLocaleLowerCase("ru")}|${need.unit}`;
@@ -216,7 +220,7 @@ export function matchIngredients(
       const chosen = choice
         ? sources.find((s) => s.id === choice.sourceId)
         : undefined;
-      const sourceMismatch = !!chosen && !sourceMatchesIngredient(need, chosen);
+      const sourceMismatch = !!chosen && !sourceAccepted(need, chosen, choice);
       const conversionRequired =
         !!chosen && conversionNeeded(need, chosen, choice?.ratio);
       const selected = choice
@@ -336,7 +340,10 @@ export function ingredientChoice(
     if (storedIngredientRule(old, key) !== key) continue;
     if (
       found &&
-      (found.sourceId !== choice.sourceId || found.ratio !== choice.ratio)
+      (found.sourceId !== choice.sourceId ||
+        found.ratio !== choice.ratio ||
+        !!found.allowPreparationSubstitution !==
+          !!choice.allowPreparationSubstitution)
     )
       return undefined;
     found = choice;
@@ -535,4 +542,18 @@ export function sourceMatchesIngredient(
     if (!core(wanted).some((w) => core(actual).includes(w))) return false;
   }
   return true;
+}
+
+/** Only an explicit choice can override the name/state check for a preparation. */
+export function sourceAccepted(
+  need: Need,
+  source: InventorySource,
+  choice?: IngredientChoice,
+): boolean {
+  return (
+    sourceMatchesIngredient(need, source) ||
+    (source.kind === "preparation" &&
+      choice?.sourceId === source.id &&
+      choice.allowPreparationSubstitution === true)
+  );
 }

@@ -5,6 +5,7 @@ import {
   conversionNeeded,
   automaticSourceConversion,
   sourceMatchesIngredient,
+  sourceAccepted,
   type IngredientChoice,
   type InventorySource,
   type MatchedNeed,
@@ -81,10 +82,14 @@ export default function IngredientSourceSelect({
     !!effective && isSpoon(need.unit) && ["г", "мл"].includes(effective.unit);
   const inputUnit = reverse ? effective!.unit : need.unit;
   const sourceUnit = reverse ? need.unit : effective?.unit;
-  const eligible = sources.filter((source) =>
-    sourceMatchesIngredient(need, source),
+  const eligible = sources.filter(
+    (source) =>
+      source.kind === "preparation" || sourceMatchesIngredient(need, source),
   );
-  const mismatch = !!selected && !sourceMatchesIngredient(need, selected);
+  const differentPreparation =
+    selected?.kind === "preparation" &&
+    !sourceMatchesIngredient(need, selected);
+  const mismatch = !!selected && !sourceAccepted(need, selected, choice);
   const similarIds = new Set(
     need.suggestions
       .filter((s) => sourceMatchesIngredient(need, s))
@@ -113,7 +118,7 @@ export default function IngredientSourceSelect({
         >
           <option value="">{emptyLabel}</option>
           <option value="none">Не учитывать для этой строки</option>
-          {mismatch && (
+          {mismatch && selected?.kind !== "preparation" && (
             <option value={choice!.sourceId} disabled>
               Не подходит: {selected!.name}
             </option>
@@ -137,12 +142,41 @@ export default function IngredientSourceSelect({
               {rest.map((s) => (
                 <option key={s.id} value={s.id}>
                   {sourceLabel(s)}
+                  {s.kind === "preparation" && !sourceMatchesIngredient(need, s)
+                    ? choice?.sourceId === s.id &&
+                      choice.allowPreparationSubstitution
+                      ? " — замена подтверждена"
+                      : " — подтвердите замену"
+                    : ""}
                 </option>
               ))}
             </optgroup>
           )}
         </select>
       </label>
+      {differentPreparation && (
+        <>
+          <small>
+            Название и состав отличаются. Подтвердите, что используете эту
+            заготовку как замену ингредиента. Если блюдо уже готово целиком,
+            используйте его в разделе «Заготовки».
+          </small>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={choice?.allowPreparationSubstitution === true}
+              onChange={(e) =>
+                onChange({
+                  ...choice,
+                  sourceId: selected!.id,
+                  allowPreparationSubstitution: e.target.checked,
+                })
+              }
+            />
+            Подтверждаю замену ингредиента «{need.name}» этой заготовкой
+          </label>
+        </>
+      )}
       {effective && !mismatch && effective.unit !== need.unit && (
         <label>
           Сколько {inputUnit} в 1 {sourceUnit}
@@ -159,6 +193,10 @@ export default function IngredientSourceSelect({
             onChange={(ratio) =>
               onChange({
                 sourceId: effective.id,
+                ...(choice?.sourceId === effective.id &&
+                choice.allowPreparationSubstitution
+                  ? { allowPreparationSubstitution: true }
+                  : {}),
                 ...(ratio === undefined
                   ? {}
                   : { ratio: reverse ? 1 / ratio : ratio }),
@@ -181,10 +219,10 @@ export default function IngredientSourceSelect({
               : "Можно поправить вручную."}
           </small>
         )}
-      {mismatch && (
+      {mismatch && !differentPreparation && (
         <small>
-          Источник не соответствует ингредиенту. Готовый суп нельзя засчитывать
-          как картофель, а бульон — как мясо.
+          Название или состояние продукта не соответствует ингредиенту. Выберите
+          подходящий источник.
         </small>
       )}
       {!mismatch && conversionRequired && (

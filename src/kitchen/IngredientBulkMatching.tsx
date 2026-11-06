@@ -5,7 +5,7 @@ import IngredientSourceSelect from "./IngredientSourceSelect";
 import {
   bulkIngredientSuggestions,
   conversionNeeded,
-  sourceMatchesIngredient,
+  sourceAccepted,
   ingredientRuleKey,
   setIngredientChoice,
   type IngredientChoices,
@@ -38,9 +38,7 @@ export default function IngredientBulkMatching({
     if (c.sourceId === "none") return false;
     const s = sources.find((s) => s.id === c.sourceId);
     return (
-      !s ||
-      !sourceMatchesIngredient(need, s) ||
-      conversionNeeded(need, s, c.ratio)
+      !s || !sourceAccepted(need, s, c) || conversionNeeded(need, s, c.ratio)
     );
   });
   return (

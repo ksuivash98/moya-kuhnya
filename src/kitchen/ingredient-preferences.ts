@@ -11,7 +11,11 @@ export function readIngredientChoices(
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
     const choices: IngredientChoices = {};
     for (const [key, v] of Object.entries(value).slice(0, 1000)) {
-      const c = v as { sourceId?: unknown; ratio?: unknown };
+      const c = v as {
+        sourceId?: unknown;
+        ratio?: unknown;
+        allowPreparationSubstitution?: unknown;
+      };
       if (
         c &&
         typeof c.sourceId === "string" &&
@@ -23,6 +27,9 @@ export function readIngredientChoices(
         choices[key] = {
           sourceId: c.sourceId,
           ...(typeof c.ratio === "number" ? { ratio: c.ratio } : {}),
+          ...(c.allowPreparationSubstitution === true
+            ? { allowPreparationSubstitution: true }
+            : {}),
         };
     }
     return choices;
