@@ -3550,3 +3550,223 @@ test("готовый суп целиком: одна заготовка вмес
     await b.close();
   }
 });
+
+test("суп с добавленным бульоном: количество по порциям, защита до обновления и совместное списание", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const recipe = await b.save("Суп с отдельно добавляемым бульоном");
+    await b.query("select public.save_recipe($1,$2,$3,$4)", [
+      recipe.id,
+      b.family,
+      {
+        ...recipe.data,
+        category: "Супы",
+        categories: ["Супы"],
+        servings: 4,
+        ingredients: [
+          {
+            id: crypto.randomUUID(),
+            name: "Готовый куриный бульон",
+            amount: "1200",
+            unit: "мл",
+          },
+        ],
+      },
+      1,
+    ]);
+    const soup = crypto.randomUUID(),
+      broth = crypto.randomUUID(),
+      menu = crypto.randomUUID();
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    await mutate("prep_save", {
+      id: soup,
+      recipe_id: recipe.id,
+      title: recipe.data.title,
+      quantity: 4,
+      unit: "порц.",
+      prepared_on: day(),
+      expires_on: "2099-01-01",
+    });
+    await mutate("prep_save", {
+      id: broth,
+      title: "Куриный бульон",
+      quantity: 1500,
+      unit: "мл",
+      prepared_on: day(),
+      expires_on: "2099-01-01",
+    });
+    await mutate("menu_save", {
+      id: menu,
+      recipe_id: recipe.id,
+      month: day().slice(0, 7) + "-01",
+      date: day(),
+      meal: "Обед",
+      servings: 4,
+      planned_count: 1,
+      status: "Запланировано",
+    });
+    await page.route("**/rest/v1/rpc/get_kitchen_state", async (route) => {
+      const args = route.request().postDataJSON();
+      const result = await b.query<{
+        get_kitchen_state: Record<string, unknown>;
+      }>("select public.get_kitchen_state($1,$2,$3,$4)", [
+        args.p_family,
+        args.p_from,
+        args.p_to,
+        args.p_offset,
+      ]);
+      await route.fulfill({
+        json: { ...result.rows[0].get_kitchen_state, schema_version: 16 },
+      });
+    });
+    const actions: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().endsWith("/rpc/kitchen_mutate"))
+        actions.push(request.postDataJSON().p_action);
+    });
+    const open = async () => {
+      await page.goto("/menu");
+      await page
+        .locator(".k-calendar")
+        .getByRole("button", {
+          name: `Действия: ${recipe.data.title}`,
+          exact: true,
+        })
+        .click();
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Подтвердить готовку", exact: true })
+        .click();
+      await page
+        .getByRole("dialog")
+        .getByRole("button", {
+          name: "Использую готовую заготовку",
+          exact: true,
+        })
+        .click();
+    };
+    await open();
+    const dialog = page.getByRole("dialog", {
+      name: "Что сделано с приготовленным блюдом?",
+      exact: true,
+    });
+    const add = dialog.getByRole("checkbox", {
+      name: "Добавляю бульон к заготовке супа",
+      exact: true,
+    });
+    await expect(add).not.toBeChecked();
+    await add.check();
+    const liquid = dialog.getByLabel("Использовать бульона (мл)", {
+      exact: true,
+    });
+    await expect(liquid).toHaveValue("1200");
+    await dialog.getByLabel("Использовать (порц.)", { exact: true }).fill("2");
+    await expect(liquid).toHaveValue("600");
+    await expect(dialog).toContainText("Останется бульона: 900 мл");
+    await dialog
+      .getByRole("checkbox", {
+        name: "Подтверждаю использование заготовки супа и указанного количества бульона",
+        exact: true,
+      })
+      .check();
+    await dialog
+      .getByRole("button", { name: "Использовать заготовку", exact: true })
+      .click();
+    await expect(dialog.getByRole("alert")).toContainText("обновление 017");
+    expect(actions).toEqual([]);
+    expect(
+      Number(
+        (
+          await b.query<{ quantity: string }>(
+            "select quantity from public.preparations where id=$1",
+            [soup],
+          )
+        ).rows[0].quantity,
+      ),
+    ).toBe(4);
+    expect(
+      Number(
+        (
+          await b.query<{ quantity: string }>(
+            "select quantity from public.preparations where id=$1",
+            [broth],
+          )
+        ).rows[0].quantity,
+      ),
+    ).toBe(1500);
+    await dialog.getByRole("button", { name: "Закрыть", exact: true }).click();
+    await page.unroute("**/rest/v1/rpc/get_kitchen_state");
+    await open();
+    await add.check();
+    await dialog.getByLabel("Использовать (порц.)", { exact: true }).fill("2");
+    await expect(liquid).toHaveValue("600");
+    await liquid.fill("500");
+    await dialog.getByLabel("Использовать (порц.)", { exact: true }).fill("1");
+    await expect(liquid).toHaveValue("500");
+    await dialog.getByLabel("Использовать (порц.)", { exact: true }).fill("2");
+    await dialog
+      .getByRole("checkbox", {
+        name: "Подтверждаю использование заготовки супа и указанного количества бульона",
+        exact: true,
+      })
+      .check();
+    await dialog
+      .getByRole("button", { name: "Использовать заготовку", exact: true })
+      .click();
+    await expect(dialog).not.toBeVisible();
+    expect(actions).toEqual(["prep_use"]);
+    expect(
+      Number(
+        (
+          await b.query<{ quantity: string }>(
+            "select quantity from public.preparations where id=$1",
+            [soup],
+          )
+        ).rows[0].quantity,
+      ),
+    ).toBe(2);
+    expect(
+      Number(
+        (
+          await b.query<{ quantity: string }>(
+            "select quantity from public.preparations where id=$1",
+            [broth],
+          )
+        ).rows[0].quantity,
+      ),
+    ).toBe(1000);
+    expect(
+      (
+        await b.query(
+          "select id from public.preparation_uses where menu_id=$1",
+          [menu],
+        )
+      ).rows,
+    ).toHaveLength(1);
+    expect(
+      (
+        await b.query(
+          "select id from public.preparation_uses where preparation_id=$1 and menu_id is null",
+          [broth],
+        )
+      ).rows,
+    ).toHaveLength(1);
+    expect(
+      (
+        await b.query("select id from public.cooking_events where menu_id=$1", [
+          menu,
+        ])
+      ).rows,
+    ).toHaveLength(0);
+  } finally {
+    await b.close();
+  }
+});

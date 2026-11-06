@@ -46,6 +46,7 @@ beforeAll(async () => {
     "202611010014_recipe_categories.sql",
     "202611010015_recipe_multiple_categories.sql",
     "202611060016_cooking_sources.sql",
+    "202611070017_preparation_broth.sql",
   ]) {
     if (file === "202610310011_shopping_categories.sql")
       await db.exec(`
@@ -1337,4 +1338,195 @@ test("заготовка в порциях: явный коэффициент, �
       ),
     ),
   ).toBe(-1.5);
+});
+
+async function soupAndBrothFixture() {
+  const f = await cookingSourcesFixture(),
+    soup = crypto.randomUUID();
+  await op("prep_save", {
+    id: soup,
+    recipe_id: recipe,
+    title: "Основа супа",
+    quantity: 4,
+    unit: "порц.",
+    prepared_on: "2026-01-01",
+    expires_on: "2099-01-01",
+  });
+  const data = {
+    id: soup,
+    version: 1,
+    quantity: "2",
+    reason: "Использование",
+    menu_id: f.plan,
+    date: "2026-11-07",
+    additional_broth_confirmed: true,
+    additional_broth: {
+      id: f.preparation,
+      version: 1,
+      quantity: "600",
+      unit: "мл",
+    },
+  };
+  return { ...f, soup, data };
+}
+test("суп и бульон списываются одной операцией ровно один раз; меню выполнено один раз", async () => {
+  const f = await soupAndBrothFixture(),
+    key = crypto.randomUUID();
+  await op("prep_use", f.data, key);
+  await op("prep_use", f.data, key);
+  expect(
+    Number(
+      await scalar("select quantity from public.preparations where id=$1", [
+        f.soup,
+      ]),
+    ),
+  ).toBe(2);
+  expect(
+    Number(
+      await scalar("select quantity from public.preparations where id=$1", [
+        f.preparation,
+      ]),
+    ),
+  ).toBe(900);
+  expect(Number(await scalar("select kitchen_menu_done($1)", [f.plan]))).toBe(
+    1,
+  );
+  expect(
+    Number(
+      await scalar(
+        "select count(*) from public.preparation_uses where menu_id=$1",
+        [f.plan],
+      ),
+    ),
+  ).toBe(1);
+  expect(
+    Number(
+      await scalar(
+        "select count(*) from public.preparation_uses where preparation_id=$1 and menu_id is null",
+        [f.preparation],
+      ),
+    ),
+  ).toBe(1);
+  expect(
+    Number(
+      await scalar(
+        "select count(*) from public.cooking_events where menu_id=$1",
+        [f.plan],
+      ),
+    ),
+  ).toBe(0);
+  expect(
+    Number(
+      await scalar("select quantity from public.stock_batches where id=$1", [
+        f.batch,
+      ]),
+    ),
+  ).toBe(100);
+});
+test("нехватка бульона или супа откатывает оба списания и отметку меню", async () => {
+  const f = await soupAndBrothFixture();
+  await expect(
+    op("prep_use", {
+      ...f.data,
+      additional_broth: { ...f.data.additional_broth, quantity: "2000" },
+    }),
+  ).rejects.toThrow("Недостаточно бульона");
+  // Broth is consumed first inside the transaction: failure in the soup must restore it.
+  await expect(op("prep_use", { ...f.data, quantity: "5" })).rejects.toThrow(
+    "не превышать остаток",
+  );
+  expect(
+    Number(
+      await scalar("select quantity from public.preparations where id=$1", [
+        f.soup,
+      ]),
+    ),
+  ).toBe(4);
+  expect(
+    Number(
+      await scalar("select quantity from public.preparations where id=$1", [
+        f.preparation,
+      ]),
+    ),
+  ).toBe(1500);
+  expect(
+    Number(
+      await scalar(
+        "select count(*) from public.preparation_uses where preparation_id in ($1,$2)",
+        [f.soup, f.preparation],
+      ),
+    ),
+  ).toBe(0);
+  expect(Number(await scalar("select kitchen_menu_done($1)", [f.plan]))).toBe(
+    0,
+  );
+});
+test("совместное использование проверяет подтверждение, единицы, версии, разные источники и права", async () => {
+  const f = await soupAndBrothFixture();
+  await expect(
+    op("prep_use", { ...f.data, additional_broth_confirmed: false }),
+  ).rejects.toThrow("Подтвердите");
+  await expect(
+    op("prep_use", {
+      ...f.data,
+      additional_broth: { ...f.data.additional_broth, unit: "л" },
+    }),
+  ).rejects.toThrow("Единица");
+  await expect(
+    op("prep_use", {
+      ...f.data,
+      additional_broth: { ...f.data.additional_broth, version: 0 },
+    }),
+  ).rejects.toThrow("бульона изменилась");
+  await expect(
+    op("prep_use", {
+      ...f.data,
+      additional_broth: { ...f.data.additional_broth, id: f.soup },
+    }),
+  ).rejects.toThrow("разными заготовками");
+  await user(other);
+  await expect(op("prep_use", f.data)).rejects.toThrow("Нет права");
+  await expect(
+    scalar("select public._preparation_use_with_broth($1,$2,$3)", [
+      family,
+      crypto.randomUUID(),
+      f.data,
+    ]),
+  ).rejects.toThrow("permission denied");
+  await user();
+  const foreign = crypto.randomUUID();
+  await db.exec("reset role");
+  await db.query(
+    "insert into public.preparations(id,family_id,title,quantity,unit,prepared_on,expires_on)values($1,'dddddddd-dddd-4ddd-8ddd-dddddddddddd','Чужой бульон',1500,'мл','2026-01-01','2099-01-01')",
+    [foreign],
+  );
+  await user();
+  await expect(
+    op("prep_use", {
+      ...f.data,
+      additional_broth: { ...f.data.additional_broth, id: foreign },
+    }),
+  ).rejects.toThrow("бульона изменилась или недоступна");
+  await op("prep_save", {
+    id: f.preparation,
+    version: 1,
+    title: "Просроченный бульон",
+    quantity: 1500,
+    unit: "мл",
+    prepared_on: "2000-01-01",
+    expires_on: "2001-01-01",
+  });
+  await expect(
+    op("prep_use", {
+      ...f.data,
+      additional_broth: { ...f.data.additional_broth, version: 2 },
+    }),
+  ).rejects.toThrow("Срок годности истёк");
+  expect(
+    Number(
+      await scalar("select quantity from public.preparations where id=$1", [
+        f.soup,
+      ]),
+    ),
+  ).toBe(4);
 });

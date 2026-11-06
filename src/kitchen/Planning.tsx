@@ -995,6 +995,8 @@ function CookingConfirm({
         <div hidden={mode !== "ready"}>
           <ReadyPreparationUse
             preparations={ready.preparations}
+            state={state}
+            choices={choices}
             initialId={ready.shared?.id ?? ready.preparations[0]?.id ?? ""}
             inactive={mode !== "ready"}
             menu={ready.menu}

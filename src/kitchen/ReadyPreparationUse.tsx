@@ -2,9 +2,13 @@ import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import { mutate } from "./api";
 import { errorText } from "../supabase";
-import { fmt, num, str, today, type Row } from "./model";
+import { soupBroth } from "./soup-broth";
+import type { IngredientChoices } from "./ingredient-matching";
+import { fmt, num, str, today, type Row, type State } from "./model";
 export default function ReadyPreparationUse({
   preparations,
+  state,
+  choices,
   initialId,
   menu,
   servings,
@@ -14,6 +18,8 @@ export default function ReadyPreparationUse({
   inactive,
 }: {
   preparations: Row[];
+  state: State;
+  choices: IngredientChoices;
   initialId: string;
   menu: Row;
   servings: number;
@@ -29,6 +35,14 @@ export default function ReadyPreparationUse({
       ? String(Math.min(servings, num(p, "quantity")))
       : "";
   const [quantity, setQuantity] = useState(() => initialQuantity(chosen));
+  const broth = soupBroth(state, menu, chosen, quantity, choices);
+  const [addBroth, setAddBroth] = useState(false);
+  const [brothId, setBrothId] = useState("");
+  const selectedBroth = broth.candidates.find(
+    (p) => p.id === (brothId || broth.preferred?.id),
+  );
+  const [brothAmount, setBrothAmount] = useState<string | null>(null);
+  const brothQuantity = brothAmount ?? broth.suggested(selectedBroth);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   return (
@@ -50,6 +64,26 @@ export default function ReadyPreparationUse({
           );
           return;
         }
+        if (addBroth) {
+          if (state.schema_version < 17) {
+            setError(
+              "Для совместного списания супа и бульона требуется обновление 017 в Supabase. Остатки не изменены.",
+            );
+            return;
+          }
+          const used = Number(brothQuantity.replace(",", "."));
+          if (
+            !selectedBroth ||
+            !/^\d+([.,]\d{1,4})?$/.test(brothQuantity) ||
+            used <= 0 ||
+            used > num(selectedBroth, "quantity")
+          ) {
+            setError(
+              "Выберите бульон и укажите количество больше нуля, не превышающее его остаток.",
+            );
+            return;
+          }
+        }
         setBusy(true);
         onBusy(true);
         const form = new FormData(e.currentTarget);
@@ -64,11 +98,24 @@ export default function ReadyPreparationUse({
               reason: "Использование",
               menu_id: menu.id,
               date: String(form.get("date")),
+              ...(addBroth && selectedBroth
+                ? {
+                    additional_broth_confirmed: true,
+                    additional_broth: {
+                      id: selectedBroth.id,
+                      version: selectedBroth.version,
+                      quantity: brothQuantity.replace(",", "."),
+                      unit: str(selectedBroth, "unit"),
+                    },
+                  }
+                : {}),
             },
             operationKey,
           );
           await onSaved(
-            "Готовая заготовка использована один раз. Ингредиенты повторно не списывались.",
+            addBroth
+              ? "Суп и добавленный бульон списаны вместе. Пункт меню выполнен один раз."
+              : "Готовая заготовка использована один раз. Ингредиенты повторно не списывались.",
           );
         } catch (err) {
           setError(errorText(err));
@@ -80,8 +127,9 @@ export default function ReadyPreparationUse({
     >
       <p className="notice">
         Вы используете уже приготовленное блюдо. Спишется только выбранное
-        количество заготовки; картофель, мясо и другие ингредиенты отдельно не
-        расходуются. Новое приготовление и новые заготовки не создаются.
+        количество заготовки и бульон, если вы добавляете его при подаче.
+        Остальные ингредиенты отдельно не расходуются. Новое приготовление и
+        новые заготовки не создаются.
       </p>
       <fieldset disabled={busy || inactive} className="k-fields">
         <label>
@@ -96,6 +144,7 @@ export default function ReadyPreparationUse({
                   preparations.find((p) => p.id === e.target.value),
                 ),
               );
+              setBrothAmount(null);
               setError("");
             }}
           >
@@ -120,6 +169,95 @@ export default function ReadyPreparationUse({
             onChange={(e) => setQuantity(e.target.value)}
           />
         </label>
+        {broth.relevant && (
+          <>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={addBroth}
+                onChange={(e) => {
+                  setAddBroth(e.target.checked);
+                  setError("");
+                }}
+              />
+              Добавляю бульон к заготовке супа
+            </label>
+            <p className="muted">
+              Отметьте, если бульон добавляется сейчас. Если он уже был учтён
+              при приготовлении супа, повторно списывать его не нужно.
+            </p>
+            {addBroth && (
+              <>
+                <label>
+                  Бульон для супа
+                  <select
+                    value={selectedBroth?.id ?? ""}
+                    required
+                    onChange={(e) => {
+                      setBrothId(e.target.value);
+                      setBrothAmount(null);
+                      setError("");
+                    }}
+                  >
+                    <option value="">Выберите заготовку бульона</option>
+                    {broth.candidates.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {str(p, "title")} — {fmt(num(p, "quantity"))}{" "}
+                        {str(p, "unit")}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Использовать бульона ({str(selectedBroth, "unit")})
+                  <input
+                    type="number"
+                    min="0.0001"
+                    max={
+                      selectedBroth ? num(selectedBroth, "quantity") : undefined
+                    }
+                    step="0.0001"
+                    required
+                    value={brothQuantity}
+                    onChange={(e) => setBrothAmount(e.target.value)}
+                  />
+                </label>
+                {selectedBroth &&
+                  Number(brothQuantity) > 0 &&
+                  Number(brothQuantity) <= num(selectedBroth, "quantity") && (
+                    <p className="muted">
+                      Останется бульона:{" "}
+                      {fmt(
+                        num(selectedBroth, "quantity") - Number(brothQuantity),
+                      )}{" "}
+                      {str(selectedBroth, "unit")}.
+                    </p>
+                  )}
+                {broth.needs.length > 0 && (
+                  <p className="muted">
+                    По рецепту на выбранные порции:{" "}
+                    {broth.needs
+                      .map((n) => `${fmt(n.quantity)} ${n.unit}`)
+                      .join(" + ")}
+                    . Проверьте фактически добавляемое количество.
+                  </p>
+                )}
+                {!broth.candidates.length && (
+                  <p className="notice">
+                    Нет непросроченного бульона с положительным остатком в
+                    заготовках.
+                  </p>
+                )}
+                {state.schema_version < 17 && (
+                  <p className="notice">
+                    Для совместного списания необходимо обновление 017 в
+                    Supabase.
+                  </p>
+                )}
+              </>
+            )}
+          </>
+        )}
         <label>
           Дата использования
           <input type="date" name="date" defaultValue={today()} required />
@@ -134,8 +272,9 @@ export default function ReadyPreparationUse({
         )}
         <label className="checkbox-label">
           <input type="checkbox" required />
-          Подтверждаю использование готовой заготовки без повторного расхода
-          ингредиентов
+          {addBroth
+            ? "Подтверждаю использование заготовки супа и указанного количества бульона"
+            : "Подтверждаю использование готовой заготовки без повторного расхода ингредиентов"}
         </label>
       </fieldset>
       {!chosen && (
