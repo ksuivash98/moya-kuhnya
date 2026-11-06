@@ -814,6 +814,7 @@ export default function App() {
                   <div className="stats-grid">
                     <Stat
                       icon={<Users />}
+                      to="/settings"
                       label="Участники семьи"
                       value={selected ? String(members.length) : "—"}
                       detail={
@@ -825,6 +826,7 @@ export default function App() {
                     />
                     <Stat
                       icon={<BookOpen />}
+                      to="/recipes"
                       label="Семейные рецепты"
                       value={recipeCount === null ? "—" : String(recipeCount)}
                       detail={
@@ -836,6 +838,7 @@ export default function App() {
                     />
                     <Stat
                       icon={<CalendarDays />}
+                      to="/menu?view=day"
                       label="Меню на сегодня"
                       value={
                         kitchenState
@@ -857,6 +860,7 @@ export default function App() {
                     />
                     <Stat
                       icon={<Wallet />}
+                      to="/budget"
                       label="Расходы месяца"
                       value={
                         kitchenState?.summary
@@ -1180,19 +1184,21 @@ export default function App() {
 }
 function Stat({
   icon,
+  to,
   label,
   value,
   detail,
   color,
 }: {
   icon: ReactNode;
+  to: string;
   label: string;
   value: string;
   detail: string;
   color: string;
 }) {
   return (
-    <section className="stat-card">
+    <NavLink className="stat-card" to={to} aria-label={label}>
       <div className="stat-top">
         <span className={`stat-icon ${color}`}>{icon}</span>
         <span className="muted">
@@ -1202,7 +1208,7 @@ function Stat({
       <div className="stat-label">{label}</div>
       <strong className="stat-value">{value}</strong>
       <small>{detail}</small>
-    </section>
+    </NavLink>
   );
 }
 function FamilyModal({

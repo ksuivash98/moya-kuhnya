@@ -3770,3 +3770,39 @@ test("суп с добавленным бульоном: количество п
     await b.close();
   }
 });
+
+test("главная: карточки семьи, рецептов, меню и расходов ведут в нужные разделы", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    for (const [label, path, heading] of [
+      ["Участники семьи", "/settings", "Настройки"],
+      ["Семейные рецепты", "/recipes", "Мои рецепты"],
+      ["Меню на сегодня", "/menu?view=day", "Меню"],
+      ["Расходы месяца", "/budget", "Бюджет"],
+    ]) {
+      await page.goto("/");
+      const card = page
+        .locator(".stats-grid")
+        .getByRole("link", { name: label, exact: true });
+      await expect(card).toHaveAttribute("href", path);
+      if (label === "Участники семьи" || label === "Семейные рецепты")
+        await card.click();
+      else {
+        await card.focus();
+        await card.press("Enter");
+      }
+      await expect(page).toHaveURL(new RegExp(path.replace("?", "\\?") + "$"));
+      await expect(page.locator("h1")).toContainText(heading);
+      if (label === "Меню на сегодня") {
+        await expect(
+          page.getByRole("button", { name: "День", exact: true }),
+        ).toHaveAttribute("aria-pressed", "true");
+        await expect(page.locator(".k-calendar.one-day .k-day")).toHaveCount(1);
+      }
+    }
+  } finally {
+    await b.close();
+  }
+});

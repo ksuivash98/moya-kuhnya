@@ -58,6 +58,7 @@ export default function Planning({
   notify: (s: string) => void;
 }) {
   const [params] = useSearchParams();
+  const requestedView = params.get("view");
   const [layout, setLayout] = useListLayout(kind);
   const [category, setCategory] = useState("");
   const [actionRow, setActionRow] = useState<Row | null>(null);
@@ -117,7 +118,9 @@ export default function Planning({
       setConfirmBusy(false);
     }
   }
-  const [mode, setMode] = useState("Месяц"),
+  const [mode, setMode] = useState(
+      kind === "menu" && requestedView === "day" ? "День" : "Месяц",
+    ),
     [anchor, setAnchor] = useState(today()),
     [dialog, setDialog] = useState<{
       action: string;
@@ -136,6 +139,11 @@ export default function Planning({
     [confirmBusy, setConfirmBusy] = useState(false);
   useEffect(() => {
     setCategory("");
+    if (kind === "menu" && requestedView === "day") {
+      setMode("День");
+      setAnchor(today());
+      return;
+    }
     try {
       setMode(
         localStorage.getItem(`kitchen-layout:${kind}`)
@@ -147,7 +155,7 @@ export default function Planning({
     } catch {
       setMode(kind === "menu" ? "Месяц" : "Список");
     }
-  }, [kind]);
+  }, [kind, requestedView]);
   const range = monthRange(month);
   const menu = rows(state, "menu_items").filter(
     (r) =>
