@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import type { ModuleProps } from "./KitchenPage";
 import Modal from "../components/Modal";
 import Fields, { type Field } from "./Fields";
+import ProductPicker from "./ProductPicker";
 import { mutate } from "./api";
 import {
   rows,
@@ -30,6 +31,7 @@ export default function Finance({
   const [params] = useSearchParams();
   const [layout, setLayout] = useListLayout(kind);
   const [category, setCategory] = useState("");
+  const [productBusy, setProductBusy] = useState(false);
   useEffect(() => {
     setCategory("");
     setPage(0);
@@ -166,6 +168,32 @@ export default function Finance({
               {
                 key: "product_id",
                 label: "Продукт",
+                render:
+                  action === "shopping_save" && !dialog?.row
+                    ? (initial) => (
+                        <ProductPicker
+                          label="Продукт"
+                          createdHint="Продукт сохранится в справочнике. В покупки он добавится после нажатия «Сохранить» внизу окна."
+                          options={products
+                            .filter((p) => !p.archived)
+                            .map((p) => ({
+                              value: p.id,
+                              label: str(p, "name"),
+                            }))}
+                          initial={String(initial ?? "")}
+                          onBusy={setProductBusy}
+                          onCreate={async (data, key) => {
+                            await mutate(
+                              family,
+                              "product_save",
+                              { ...data, minimum: 0, archived: false },
+                              key,
+                            );
+                            await reload();
+                          }}
+                        />
+                      )
+                    : undefined,
                 options: products
                   .filter((p) => !p.archived)
                   .map((p) => ({ value: p.id, label: str(p, "name") })),
@@ -306,7 +334,6 @@ export default function Finance({
                 </button>
                 <button
                   className="secondary"
-                  disabled={!products.length}
                   onClick={() => setDialog({ action: "shopping_save" })}
                 >
                   Добавить вручную
@@ -568,11 +595,12 @@ export default function Finance({
                   : "Позиция покупок"
           }
           fields={fields}
+          externalBusy={productBusy}
           initial={{
             id: crypto.randomUUID(),
             month: monthRange(month).from,
             date: today(),
-            product_id: products[0]?.id,
+            product_id: action === "shopping_save" ? "" : products[0]?.id,
             quantity: 1,
             unit: "г",
             amount: 0,

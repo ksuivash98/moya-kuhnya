@@ -8,6 +8,8 @@ export default function ProductPicker({
   initial,
   onCreate,
   onBusy,
+  label = "Какой продукт",
+  createdHint = "Продукт сохранится в справочнике. Запас добавится после нажатия «Сохранить» внизу окна.",
 }: {
   options: Option[];
   initial: string;
@@ -16,6 +18,8 @@ export default function ProductPicker({
     key: string,
   ) => Promise<void>;
   onBusy: (busy: boolean) => void;
+  label?: string;
+  createdHint?: string;
 }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(initial);
@@ -55,10 +59,10 @@ export default function ProductPicker({
         />
       </label>
       <label>
-        Какой продукт
+        {label}
         <select
           name="product_id"
-          aria-label="Какой продукт"
+          aria-label={label}
           value={selected}
           required
           disabled={busy}
@@ -137,10 +141,7 @@ export default function ProductPicker({
                 ))}
             </select>
           </label>
-          <p className="muted">
-            Продукт сохранится в справочнике. Запас добавится после нажатия
-            «Сохранить» внизу окна.
-          </p>
+          <p className="muted">{createdHint}</p>
           <div className="k-actions">
             <button
               type="button"

@@ -2022,3 +2022,112 @@ for (const kind of ["menu", "cooking"])
       await b.close();
     }
   });
+
+test("покупки вручную: создать продукт в пустом справочнике и сохранить заполненную позицию", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    await page.goto("/shopping");
+    await page
+      .getByRole("button", { name: "Добавить вручную", exact: true })
+      .click();
+    const modal = page.getByRole("dialog");
+    await modal.getByLabel("Количество", { exact: true }).fill("3");
+    await modal
+      .getByRole("combobox", { name: "Единица", exact: true })
+      .selectOption("шт.");
+    await modal
+      .getByRole("combobox", { name: "Категория", exact: true })
+      .selectOption("Фрукты");
+    await modal
+      .getByRole("searchbox", { name: "Поиск продукта", exact: true })
+      .fill("Гранат");
+    await modal
+      .getByRole("button", { name: "Создать новый продукт", exact: true })
+      .click();
+    await expect(
+      modal.getByLabel("Название нового продукта", { exact: true }),
+    ).toHaveValue("Гранат");
+    await modal
+      .getByRole("combobox", { name: "Категория нового продукта", exact: true })
+      .selectOption("Фрукты");
+    await modal
+      .getByRole("combobox", {
+        name: "Единица учёта нового продукта",
+        exact: true,
+      })
+      .selectOption("шт.");
+    await expect(modal).toContainText(
+      "В покупки он добавится после нажатия «Сохранить»",
+    );
+    await modal
+      .getByRole("button", { name: "Создать и выбрать", exact: true })
+      .click();
+    const picker = modal.getByRole("combobox", {
+      name: "Продукт",
+      exact: true,
+    });
+    await expect(picker.locator("option:checked")).toHaveText("Гранат");
+    await expect(modal.getByLabel("Количество", { exact: true })).toHaveValue(
+      "3",
+    );
+    await expect(
+      modal.getByRole("combobox", { name: "Единица", exact: true }),
+    ).toHaveValue("шт.");
+    await expect(
+      modal.getByRole("combobox", { name: "Категория", exact: true }),
+    ).toHaveValue("Фрукты");
+    expect(
+      (await b.query("select id from public.shopping_items")).rows,
+    ).toHaveLength(0);
+    await modal.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(modal).toHaveCount(0);
+    const saved = await b.query<{
+      name: string;
+      quantity: number;
+      unit: string;
+      category: string;
+      status: string;
+    }>(
+      "select p.name,s.quantity,s.unit,s.category,s.status from public.shopping_items s join public.products p on p.id=s.product_id",
+    );
+    expect(saved.rows).toHaveLength(1);
+    expect(saved.rows[0]).toMatchObject({
+      name: "Гранат",
+      unit: "шт.",
+      category: "Фрукты",
+      status: "open",
+    });
+    expect(Number(saved.rows[0].quantity)).toBe(3);
+    await page
+      .getByRole("button", { name: "Добавить вручную", exact: true })
+      .click();
+    await modal
+      .getByRole("searchbox", { name: "Поиск продукта", exact: true })
+      .fill("ГРАН");
+    await picker.selectOption({ label: "Гранат" });
+    await modal.getByLabel("Количество", { exact: true }).fill("2");
+    await modal
+      .getByRole("combobox", { name: "Единица", exact: true })
+      .selectOption("шт.");
+    await modal.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect(modal).toHaveCount(0);
+    expect((await b.query("select id from public.products")).rows).toHaveLength(
+      1,
+    );
+    expect(
+      (await b.query("select id from public.shopping_items")).rows,
+    ).toHaveLength(2);
+    expect(
+      (await b.query("select id from public.stock_batches")).rows,
+    ).toHaveLength(0);
+    expect((await b.query("select id from public.expenses")).rows).toHaveLength(
+      0,
+    );
+    await page.reload();
+    await expect(page.locator("article.finance-item")).toHaveCount(2);
+  } finally {
+    await b.close();
+  }
+});
