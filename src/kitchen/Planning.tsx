@@ -10,6 +10,8 @@ import IngredientSourceSelect from "./IngredientSourceSelect";
 import { readIngredientChoices } from "./ingredient-preferences";
 import { ingredientChoice, setIngredientChoice } from "./ingredient-matching";
 import { cookingSources } from "./cooking-sources";
+import { readyPreparations } from "./ready-preparations";
+import ReadyPreparationUse from "./ReadyPreparationUse";
 import { planRequirements } from "./plan-requirements";
 import Modal from "../components/Modal";
 import {
@@ -891,11 +893,12 @@ export default function Planning({
           state={state}
           userId={userId}
           onClose={() => setCooking(null)}
-          onSaved={async () => {
+          onSaved={async (message) => {
             setCooking(null);
             await reload();
             notify(
-              "Приготовление подтверждено. Расход и заготовки сохранены один раз.",
+              message ??
+                "Приготовление подтверждено. Расход и заготовки сохранены один раз.",
             );
           }}
         />
@@ -916,7 +919,7 @@ function CookingConfirm({
   state: State;
   userId: string;
   onClose: () => void;
-  onSaved: () => Promise<void>;
+  onSaved: (message?: string) => Promise<void>;
 }) {
   const [usage, setUsage] = useState(() =>
     ingredients(row).map((i) => ({
@@ -938,6 +941,16 @@ function CookingConfirm({
     readIngredientChoices(userId, family),
   );
   const actual = cookingSources(state, family, usage, choices);
+  const ready = readyPreparations(
+    state,
+    family,
+    row,
+    actual.matchedByRow,
+    choices,
+  );
+  const [mode, setMode] = useState<"cook" | "ready">(() =>
+    ready.eligible && ready.allShared ? "ready" : "cook",
+  );
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [key] = useState(crypto.randomUUID());
@@ -946,199 +959,272 @@ function CookingConfirm({
       title="Что сделано с приготовленным блюдом?"
       onClose={() => !busy && onClose()}
     >
-      <form
-        className="form-stack"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setBusy(true);
-          setError("");
-          const f = new FormData(e.currentTarget);
-          try {
-            if (actual.errors.length) throw new Error(actual.errors.join(" "));
-            if (state.schema_version < 16 && actual.requiresPreparation)
-              throw new Error(
-                "Для списания заготовок требуется серверное обновление 016 в Supabase. Приготовление не сохранено, остатки не изменены.",
-              );
-            await mutate(
-              family,
-              state.schema_version >= 16
-                ? "cook_confirm_sources"
-                : "cook_confirm",
-              {
-                ...Object.fromEntries(f),
-                task_id: row.checked_steps !== undefined ? row.id : "",
-                menu_id: row.checked_steps === undefined ? row.id : row.menu_id,
-                version: row.version,
-                usage:
-                  state.schema_version >= 16
-                    ? actual.allocations
-                    : actual.legacyUsage,
-                usage_confirmed: true,
-              },
-              key,
-            );
-            await onSaved();
-          } catch (err) {
-            setError(errorText(err));
-          } finally {
-            setBusy(false);
-          }
-        }}
+      <div
+        className="planning-periods"
+        role="group"
+        aria-label="Способ выполнения плана"
       >
-        <fieldset disabled={busy} className="k-fields">
-          <label>
-            Дата
-            <input type="date" name="date" defaultValue={today()} required />
-          </label>
-          {[
-            {
-              key: "servings",
-              label: "Фактически приготовлено",
-              value: num(row, "servings"),
-            },
-            { key: "eaten", label: "Съели", value: num(row, "servings") },
-            { key: "fridge", label: "В холодильник", value: 0 },
-            { key: "frozen", label: "В морозилку", value: 0 },
-          ].map((f) => (
-            <label key={f.key}>
-              {f.label}, порц.
-              <input
-                type="number"
-                name={f.key}
-                min={0}
-                step="0.0001"
-                defaultValue={f.value}
-                required
-              />
+        <button
+          type="button"
+          disabled={busy}
+          className={mode === "cook" ? "active" : ""}
+          aria-pressed={mode === "cook"}
+          onClick={() => setMode("cook")}
+        >
+          Готовлю из ингредиентов
+        </button>
+        <button
+          type="button"
+          disabled={busy || !ready.eligible || !ready.preparations.length}
+          className={mode === "ready" ? "active" : ""}
+          aria-pressed={mode === "ready"}
+          onClick={() => setMode("ready")}
+        >
+          Использую готовую заготовку
+        </button>
+      </div>
+      {ready.shared && (
+        <p className="notice">
+          Одна готовая заготовка выбрана для {ready.sharedCount} ингредиентов. В
+          режиме готовки для каждого ингредиента рассчитывается отдельное
+          количество этой заготовки. Если это уже готовое блюдо, используйте его
+          целиком в режиме «Использую готовую заготовку».
+        </p>
+      )}
+      {ready.menu && ready.eligible && (
+        <div hidden={mode !== "ready"}>
+          <ReadyPreparationUse
+            preparations={ready.preparations}
+            initialId={ready.shared?.id ?? ready.preparations[0]?.id ?? ""}
+            inactive={mode !== "ready"}
+            menu={ready.menu}
+            servings={num(row, "servings")}
+            onSaved={onSaved}
+            onBusy={setBusy}
+            operationKey={key}
+          />
+        </div>
+      )}
+      <div hidden={mode === "ready" && ready.eligible && !!ready.menu}>
+        {!ready.preparations.length && (
+          <p className="muted">
+            Для использования готового блюда целиком нужна непросроченная
+            заготовка, связанная с рецептом этого пункта меню.{" "}
+            <NavLink to="/preparations">Открыть заготовки</NavLink>.
+          </p>
+        )}
+        {!ready.eligible && ready.preparations.length > 0 && (
+          <p className="muted">
+            Использование готового блюда с отметкой плана доступно из пункта
+            меню или первой связанной задачи.{" "}
+            <NavLink to="/menu">Открыть меню</NavLink>.
+          </p>
+        )}
+        <form
+          className="form-stack"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (mode !== "cook" || busy) return;
+            setBusy(true);
+            setError("");
+            const f = new FormData(e.currentTarget);
+            try {
+              if (actual.errors.length)
+                throw new Error(actual.errors.join(" "));
+              if (state.schema_version < 16 && actual.requiresPreparation)
+                throw new Error(
+                  "Для списания заготовок требуется серверное обновление 016 в Supabase. Приготовление не сохранено, остатки не изменены.",
+                );
+              await mutate(
+                family,
+                state.schema_version >= 16
+                  ? "cook_confirm_sources"
+                  : "cook_confirm",
+                {
+                  ...Object.fromEntries(f),
+                  task_id: row.checked_steps !== undefined ? row.id : "",
+                  menu_id:
+                    row.checked_steps === undefined ? row.id : row.menu_id,
+                  version: row.version,
+                  usage:
+                    state.schema_version >= 16
+                      ? actual.allocations
+                      : actual.legacyUsage,
+                  usage_confirmed: true,
+                },
+                key,
+              );
+              await onSaved();
+            } catch (err) {
+              setError(errorText(err));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <fieldset disabled={busy || mode !== "cook"} className="k-fields">
+            <label>
+              Дата
+              <input type="date" name="date" defaultValue={today()} required />
             </label>
-          ))}
-          <label>
-            Годен в холодильнике до
-            <input type="date" name="fridge_expiry" />
-          </label>
-          <label>
-            Годен в морозилке до
-            <input type="date" name="frozen_expiry" />
-          </label>
-          <p className="muted">
-            Сроки не заполняются автоматически: укажите подтверждённые вами
-            даты. Сумма распределения должна совпасть с фактическими порциями.
-          </p>
-          <h3>Проверьте фактический расход</h3>
-          <p className="muted">
-            Проверьте количество и источник каждого ингредиента. Сохранённый
-            подбор из меню уже применён; здесь источник можно изменить для этого
-            приготовления. Заготовка списывается из своего остатка, её исходные
-            ингредиенты повторно не расходуются. Для неиспользованного
-            ингредиента укажите 0. «По вкусу» автоматически не списывается.
-          </p>
-          {usage.map((u, index) => (
-            <div key={index} className="k-usage-row">
-              <label>
-                {u.name}
+            {[
+              {
+                key: "servings",
+                label: "Фактически приготовлено",
+                value: num(row, "servings"),
+              },
+              { key: "eaten", label: "Съели", value: num(row, "servings") },
+              { key: "fridge", label: "В холодильник", value: 0 },
+              { key: "frozen", label: "В морозилку", value: 0 },
+            ].map((f) => (
+              <label key={f.key}>
+                {f.label}, порц.
                 <input
-                  aria-label={`Расход: ${u.name}`}
-                  inputMode="decimal"
-                  value={u.amount}
-                  onChange={(e) =>
-                    setUsage((prev) =>
-                      prev.map((x, i) =>
-                        i === index ? { ...x, amount: e.target.value } : x,
-                      ),
-                    )
-                  }
+                  type="number"
+                  name={f.key}
+                  min={0}
+                  step="0.0001"
+                  defaultValue={f.value}
                   required
                 />
               </label>
-              <label>
-                Единица
-                <select
-                  value={u.unit}
-                  onChange={(e) =>
-                    setUsage((prev) =>
-                      prev.map((x, i) =>
-                        i === index ? { ...x, unit: e.target.value } : x,
-                      ),
-                    )
-                  }
-                >
-                  {[
-                    "г",
-                    "кг",
-                    "мл",
-                    "л",
-                    "шт.",
-                    "ч. л.",
-                    "ст. л.",
-                    "стакан",
-                    "упаковка",
-                  ].map((v) => (
-                    <option key={v}>{v}</option>
-                  ))}
-                </select>
-              </label>
-              <div className="cooking-ingredient-source">
-                <IngredientSourceSelect
-                  need={actual.matchedByRow[index]}
-                  sources={actual.sources}
-                  choice={ingredientChoice(choices, actual.matchedByRow[index])}
-                  onChange={(choice) =>
-                    setChoices((current) =>
-                      setIngredientChoice(
-                        current,
-                        actual.matchedByRow[index],
-                        choice,
-                      ),
-                    )
-                  }
-                />
-                {actual.allocations[index].sources.map((source, part) => (
-                  <p className="muted" key={part}>
-                    Будет списано:{" "}
-                    {source.kind === "preparation" ? "заготовка" : "продукт"} «
-                    {
-                      actual.sources.find(
-                        (s) =>
-                          s.id ===
-                          `${source.kind}:${source.id}${source.kind === "product" ? ":" + source.unit : ""}`,
-                      )?.name
+            ))}
+            <label>
+              Годен в холодильнике до
+              <input type="date" name="fridge_expiry" />
+            </label>
+            <label>
+              Годен в морозилке до
+              <input type="date" name="frozen_expiry" />
+            </label>
+            <p className="muted">
+              Сроки не заполняются автоматически: укажите подтверждённые вами
+              даты. Сумма распределения должна совпасть с фактическими порциями.
+            </p>
+            <h3>Проверьте фактический расход</h3>
+            <p className="muted">
+              Проверьте количество и источник каждого ингредиента. Сохранённый
+              подбор из меню уже применён; здесь источник можно изменить для
+              этого приготовления. Заготовка списывается из своего остатка, её
+              исходные ингредиенты повторно не расходуются. Для
+              неиспользованного ингредиента укажите 0. «По вкусу» автоматически
+              не списывается.
+            </p>
+            {usage.map((u, index) => (
+              <div key={index} className="k-usage-row">
+                <label>
+                  {u.name}
+                  <input
+                    aria-label={`Расход: ${u.name}`}
+                    inputMode="decimal"
+                    value={u.amount}
+                    onChange={(e) =>
+                      setUsage((prev) =>
+                        prev.map((x, i) =>
+                          i === index ? { ...x, amount: e.target.value } : x,
+                        ),
+                      )
                     }
-                    » — {fmt(Number(source.quantity))} {source.unit}
-                  </p>
-                ))}
-                {actual.matchedByRow[index].missing > 0 && (
-                  <p className="error">
-                    Не хватает: {fmt(actual.matchedByRow[index].missing)}{" "}
-                    {actual.matchedByRow[index].unit}
-                  </p>
-                )}
+                    required
+                  />
+                </label>
+                <label>
+                  Единица
+                  <select
+                    value={u.unit}
+                    onChange={(e) =>
+                      setUsage((prev) =>
+                        prev.map((x, i) =>
+                          i === index ? { ...x, unit: e.target.value } : x,
+                        ),
+                      )
+                    }
+                  >
+                    {[
+                      "г",
+                      "кг",
+                      "мл",
+                      "л",
+                      "шт.",
+                      "ч. л.",
+                      "ст. л.",
+                      "стакан",
+                      "упаковка",
+                    ].map((v) => (
+                      <option key={v}>{v}</option>
+                    ))}
+                  </select>
+                </label>
+                <div className="cooking-ingredient-source">
+                  <IngredientSourceSelect
+                    need={actual.matchedByRow[index]}
+                    sources={actual.sources}
+                    choice={ingredientChoice(
+                      choices,
+                      actual.matchedByRow[index],
+                    )}
+                    onChange={(choice) =>
+                      setChoices((current) =>
+                        setIngredientChoice(
+                          current,
+                          actual.matchedByRow[index],
+                          choice,
+                        ),
+                      )
+                    }
+                  />
+                  {actual.allocations[index].sources.map((source, part) => (
+                    <p className="muted" key={part}>
+                      Будет списано:{" "}
+                      {source.kind === "preparation" ? "заготовка" : "продукт"}{" "}
+                      «
+                      {
+                        actual.sources.find(
+                          (s) =>
+                            s.id ===
+                            `${source.kind}:${source.id}${source.kind === "product" ? ":" + source.unit : ""}`,
+                        )?.name
+                      }
+                      » — {fmt(Number(source.quantity))} {source.unit}
+                    </p>
+                  ))}
+                  {actual.matchedByRow[index].missing > 0 && (
+                    <p className="error">
+                      Не хватает: {fmt(actual.matchedByRow[index].missing)}{" "}
+                      {actual.matchedByRow[index].unit}
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
-          {state.schema_version < 16 && actual.requiresPreparation && (
-            <p className="notice">
-              Для списания заготовок необходимо серверное обновление 016 в
-              Supabase.
+            ))}
+            {state.schema_version < 16 && actual.requiresPreparation && (
+              <p className="notice">
+                Для списания заготовок необходимо серверное обновление 016 в
+                Supabase.
+              </p>
+            )}
+            <label>
+              Примечания
+              <textarea name="notes" />
+            </label>
+            <label className="checkbox-label">
+              <input type="checkbox" required />
+              Подтверждаю расход и распределение порций
+            </label>
+          </fieldset>
+          {error && (
+            <p className="error" role="alert">
+              {error}
             </p>
           )}
-          <label>
-            Примечания
-            <textarea name="notes" />
-          </label>
-          <label className="checkbox-label">
-            <input type="checkbox" required />
-            Подтверждаю расход и распределение порций
-          </label>
-        </fieldset>
-        {error && (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        )}
-        <button className="primary" disabled={busy || !navigator.onLine}>
-          {busy ? "Подтверждаем…" : "Подтвердить приготовление"}
-        </button>
-      </form>
+          <button
+            className="primary"
+            disabled={busy || mode !== "cook" || !navigator.onLine}
+          >
+            {busy ? "Подтверждаем…" : "Подтвердить приготовление"}
+          </button>
+        </form>
+      </div>
     </Modal>
   );
 }
