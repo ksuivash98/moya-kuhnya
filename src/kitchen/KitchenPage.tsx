@@ -90,22 +90,55 @@ export default function KitchenPage({
     };
   }, [reload, familyId, userId]);
   const heading = (
-    <div className="page-heading">
-      <div>
-        <p className="eyebrow">ВАША СЕМЕЙНАЯ КУХНЯ</p>
-        <h1>{names[kind]}</h1>
-        <p className="muted">Общие планы и реальные данные вашей семьи.</p>
+    <>
+      <div className="page-heading">
+        <div>
+          <p className="eyebrow">ВАША СЕМЕЙНАЯ КУХНЯ</p>
+          <h1>{names[kind]}</h1>
+          <p className="muted">
+            {kind === "menu"
+              ? "Что и когда семья будет есть."
+              : kind === "cooking"
+                ? "Что, когда и сколько нужно приготовить."
+                : "Общие планы и реальные данные вашей семьи."}
+          </p>
+        </div>
+        <label>
+          Период
+          <input
+            aria-label="Месяц"
+            type="month"
+            value={month}
+            onChange={(e) => e.target.value && setMonth(e.target.value)}
+          />
+        </label>
       </div>
-      <label>
-        Период
-        <input
-          aria-label="Месяц"
-          type="month"
-          value={month}
-          onChange={(e) => e.target.value && setMonth(e.target.value)}
-        />
-      </label>
-    </div>
+      {(kind === "menu" || kind === "cooking") && (
+        <details className="panel planning-help">
+          <summary>Чем отличаются меню и план приготовления?</summary>
+          <p>
+            <strong>Меню</strong> — план питания: блюда по дням и приёмам пищи,
+            количество порций для семьи.
+          </p>
+          <p>
+            <strong>План приготовления</strong> — задачи на кухне: когда и
+            сколько готовить, какие шаги выполнить, сколько порций оставить в
+            заготовках.
+          </p>
+          <p>
+            Например, суп можно запланировать в меню на понедельник, а
+            приготовить в воскресенье. Чтобы связать записи, откройте действия
+            блюда в меню, нажмите «В план готовки» и задайте дату приготовления.
+          </p>
+          <p>
+            Добавление записи в меню или план не списывает продукты. Фактический
+            расход и новые заготовки сохраняются после «Подтвердить готовку» —
+            эта кнопка доступна в обоих разделах. Использование уже готовых
+            заготовок отмечается в «Заготовках».
+          </p>
+        </details>
+      )}
+    </>
   );
   if (!configured || !userId || !familyId)
     return (
