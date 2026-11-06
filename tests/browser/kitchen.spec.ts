@@ -2131,3 +2131,105 @@ test("покупки вручную: создать продукт в пусто
     await b.close();
   }
 });
+
+for (const kind of ["menu", "cooking"])
+  test(`поиск рецепта ${kind}: выбор на день, пустой поиск и сохранение параметров`, async ({
+    page,
+  }) => {
+    const b = await recipeBackend(page);
+    try {
+      const soup = await b.save("Борщ домашний");
+      const salad = await b.save("Салат зелёный");
+      await b.save("Плов");
+      await page.goto("/" + kind);
+      await expect(
+        page.getByRole("button", { name: "Добавить блюдо", exact: true }),
+      ).toBeEnabled();
+      await page.getByRole("button", { name: "День", exact: true }).click();
+      await page
+        .getByRole("button", { name: `Добавить блюдо ${day()}`, exact: true })
+        .click();
+      const modal = page.getByRole("dialog");
+      const search = modal.getByRole("searchbox", {
+        name: "Поиск рецепта",
+        exact: true,
+      });
+      const picker = modal.getByRole("combobox", {
+        name: "Рецепт",
+        exact: true,
+      });
+      await modal.getByLabel("Количество порций", { exact: true }).fill("3");
+      await modal
+        .getByLabel("Примечания", { exact: true })
+        .fill("На выбранный день");
+      await search.fill("ЗЕЛЕН");
+      await expect(picker.locator("option")).toHaveText([
+        "Выберите рецепт",
+        "Салат зелёный",
+      ]);
+      await picker.selectOption(salad.id);
+      await search.fill("Нет такого рецепта");
+      await expect(picker).toHaveValue("");
+      await expect(modal).toContainText("Рецепты не найдены");
+      await modal
+        .getByRole("button", { name: "Сохранить", exact: true })
+        .click();
+      await expect(modal).toBeVisible();
+      const table = kind === "menu" ? "menu_items" : "cooking_tasks";
+      expect(
+        (await b.query(`select id from public.${table}`)).rows,
+      ).toHaveLength(0);
+      await search.fill("");
+      await expect(picker.locator("option")).toHaveCount(4);
+      await search.fill("борщ");
+      await picker.selectOption(soup.id);
+      await expect(modal.getByLabel("Дата", { exact: true })).toHaveValue(
+        day(),
+      );
+      await expect(
+        modal.getByLabel("Количество порций", { exact: true }),
+      ).toHaveValue("3");
+      await expect(modal.getByLabel("Примечания", { exact: true })).toHaveValue(
+        "На выбранный день",
+      );
+      await modal
+        .getByRole("button", { name: "Сохранить", exact: true })
+        .click();
+      await expect(modal).toHaveCount(0);
+      const saved = await b.query<{
+        id: string;
+        recipe_id: string;
+        date: string;
+        servings: number;
+        notes: string;
+      }>(`select id,recipe_id,date::text as date,servings,notes from public.${table}`);
+      expect(saved.rows).toHaveLength(1);
+      expect(saved.rows[0]).toMatchObject({
+        recipe_id: soup.id,
+        date: day(),
+        notes: "На выбранный день",
+      });
+      expect(Number(saved.rows[0].servings)).toBe(3);
+      await page
+        .getByRole("button", { name: "Действия: Борщ домашний", exact: true })
+        .click();
+      await modal
+        .getByRole("button", { name: "Изменить", exact: true })
+        .click();
+      await expect(picker).toHaveValue(soup.id);
+      await search.fill("салат");
+      await picker.selectOption(salad.id);
+      await modal
+        .getByRole("button", { name: "Сохранить", exact: true })
+        .click();
+      await expect(modal).toHaveCount(0);
+      const changed = await b.query<{ id: string; recipe_id: string }>(
+        `select id,recipe_id from public.${table}`,
+      );
+      expect(changed.rows).toEqual([
+        { id: saved.rows[0].id, recipe_id: salad.id },
+      ]);
+    } finally {
+      await b.close();
+    }
+  });

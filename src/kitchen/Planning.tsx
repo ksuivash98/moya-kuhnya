@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { NavLink, useSearchParams } from "react-router-dom";
 import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import Fields, { type Field } from "./Fields";
+import RecipePicker from "./RecipePicker";
 import Modal from "../components/Modal";
 import {
   type State,
@@ -170,6 +171,9 @@ export default function Planning({
   const recipeField: Field = {
     key: "recipe_id",
     label: "Рецепт",
+    render: (initial) => (
+      <RecipePicker options={options} initial={String(initial ?? "")} />
+    ),
     options,
     required: true,
   };
