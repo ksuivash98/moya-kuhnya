@@ -283,7 +283,7 @@ details .checkbox-label {
   grid-template-columns: 1.5fr 1fr;
   gap: 12px;
 }
-.one-day {
+.k-calendar.one-day {
   grid-template-columns: 1fr;
 }
 .k-metrics {
@@ -550,10 +550,10 @@ details .checkbox-label {
 .planning-actions-dialog .k-actions > :is(button, a):hover {
   background: var(--surface);
 }
-@media (min-width: 721px) {
-  .k-calendar.one-day .k-day {
-    height: min(520px, 65vh);
-  }
+.k-calendar.one-day .k-day {
+  height: auto;
+  min-height: 100px;
+  max-height: 320px;
 }
 @media (max-width: 720px) {
   .k-day {

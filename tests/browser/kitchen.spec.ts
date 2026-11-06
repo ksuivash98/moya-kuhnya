@@ -1503,6 +1503,16 @@ test("календарь с множеством блюд: ограниченн�
         dateTop,
         0,
       );
+      await page.getByRole("button", { name: "День", exact: true }).click();
+      const singleDay = page.locator(".k-calendar.one-day .k-day");
+      expect((await singleDay.boundingBox())!.height).toBeLessThanOrEqual(320);
+      await expect(singleDay.locator("article")).toHaveCount(8);
+      expect(
+        await singleDay
+          .locator(".k-day-items")
+          .evaluate((el) => el.scrollHeight > el.clientHeight),
+      ).toBe(true);
+      await page.getByRole("button", { name: "Неделя", exact: true }).click();
       const trigger = contents
         .getByRole("button", { name: /^Действия:/ })
         .last();
@@ -2397,6 +2407,18 @@ test("ингредиенты меню: похожие продукты, заго
       /^72\s*г$/,
     );
     await page.getByRole("button", { name: "День", exact: true }).click();
+    const dayBounds = (await page
+      .locator(".k-calendar.one-day .k-day")
+      .boundingBox())!;
+    expect(dayBounds.height).toBeLessThanOrEqual(150);
+    expect(dayBounds.width).toBeCloseTo(
+      (await page.locator(".k-calendar.one-day").boundingBox())!.width,
+      0,
+    );
+    const ingredientsBounds = (await panel.boundingBox())!;
+    expect(
+      ingredientsBounds.y - dayBounds.y - dayBounds.height,
+    ).toBeLessThanOrEqual(32);
     await expect(brothRow.locator("td").nth(2)).toHaveText(/^1\s*600\s*мл/);
     await page.reload();
     await expect(brothRow.locator("td").nth(2)).toHaveText(/^1\s*600\s*мл/);
