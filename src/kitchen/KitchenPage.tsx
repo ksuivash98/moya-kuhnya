@@ -197,7 +197,7 @@ export default function KitchenPage({
         ) : ["products", "preparations"].includes(kind) ? (
           <Inventory kind={kind} {...props} />
         ) : (
-          <Planning kind={kind} {...props} />
+          <Planning kind={kind} {...props} userId={userId} />
         ))}
     </>
   );

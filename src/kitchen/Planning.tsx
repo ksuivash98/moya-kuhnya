@@ -5,6 +5,7 @@ import { NavLink, useSearchParams } from "react-router-dom";
 import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import Fields, { type Field } from "./Fields";
 import RecipePicker from "./RecipePicker";
+import IngredientAvailability from "./IngredientAvailability";
 import Modal from "../components/Modal";
 import {
   type State,
@@ -31,6 +32,7 @@ export default function Planning({
   state,
   recipes,
   family,
+  userId,
   canEdit,
   month,
   reload,
@@ -43,6 +45,7 @@ export default function Planning({
     data: { title: string; category?: string; categories?: string[] };
   }[];
   family: string;
+  userId: string;
   canEdit: boolean;
   month: string;
   reload: () => Promise<void>;
@@ -734,34 +737,12 @@ export default function Planning({
           вкусу» уточните при готовке. Просроченные партии не учитываются.
         </p>
         {requirements.length ? (
-          <div className="k-table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Продукт</th>
-                  <th>Нужно</th>
-                  <th>Есть дома</th>
-                  <th>Докупить</th>
-                </tr>
-              </thead>
-              <tbody>
-                {requirements.map((n) => (
-                  <tr key={n.name + n.unit}>
-                    <td>{n.name}</td>
-                    <td>
-                      {fmt(n.quantity)} {n.unit}
-                    </td>
-                    <td>
-                      {fmt(n.available)} {n.unit}
-                    </td>
-                    <td>
-                      {fmt(n.missing)} {n.unit}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <IngredientAvailability
+            needs={requirements}
+            state={state}
+            family={family}
+            userId={userId}
+          />
         ) : (
           <p className="muted">
             Нет незавершённых блюд с количественными ингредиентами.

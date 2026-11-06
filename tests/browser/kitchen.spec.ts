@@ -2202,7 +2202,9 @@ for (const kind of ["menu", "cooking"])
         date: string;
         servings: number;
         notes: string;
-      }>(`select id,recipe_id,date::text as date,servings,notes from public.${table}`);
+      }>(
+        `select id,recipe_id,date::text as date,servings,notes from public.${table}`,
+      );
       expect(saved.rows).toHaveLength(1);
       expect(saved.rows[0]).toMatchObject({
         recipe_id: soup.id,
@@ -2233,3 +2235,199 @@ for (const kind of ["menu", "cooking"])
       await b.close();
     }
   });
+
+test("ингредиенты меню: похожие продукты, заготовки, пересчёт порций и сохранение выбора", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const recipe = await b.save("Суп для сопоставления запасов");
+    const ingredients = [
+      ["Готовый куриный бульон", "1200", "мл"],
+      ["Отварное куриное мясо", "180", "г"],
+      ["Картофель", "240", "г"],
+      ["Морковь", "60", "г"],
+      ["Репчатый лук", "60", "г"],
+      ["Растительное масло", "6.4", "мл"],
+      ["Яичная лапша (сухая)", "72", "г"],
+    ];
+    await b.query("select public.save_recipe($1,$2,$3,$4)", [
+      recipe.id,
+      b.family,
+      {
+        ...recipe.data,
+        servings: 4,
+        ingredients: ingredients.map(([name, amount, unit]) => ({
+          id: crypto.randomUUID(),
+          name,
+          amount,
+          unit,
+        })),
+      },
+      1,
+    ]);
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    const broth = crypto.randomUUID(),
+      chicken = crypto.randomUUID(),
+      expired = crypto.randomUUID();
+    for (const data of [
+      {
+        id: broth,
+        title: "Куриный бульон",
+        quantity: 2,
+        unit: "порц.",
+        expires_on: "2099-01-01",
+      },
+      {
+        id: chicken,
+        title: "Курица отварная",
+        quantity: 200,
+        unit: "г",
+        expires_on: "2099-01-01",
+      },
+      {
+        id: expired,
+        title: "Готовый куриный бульон",
+        quantity: 9000,
+        unit: "мл",
+        expires_on: "2000-01-01",
+      },
+    ])
+      await mutate("prep_save", {
+        ...data,
+        prepared_on: data.id === expired ? "1999-01-01" : day(),
+        category: "Готовые блюда",
+      });
+    const productIds: Record<string, string> = {};
+    for (const [name, quantity, unit] of [
+      ["Картошка", 500, "г"],
+      ["Моркови", 100, "г"],
+      ["Лук", 100, "г"],
+      ["Масло подсолнечное", 100, "мл"],
+    ] as const) {
+      const id = crypto.randomUUID();
+      productIds[name] = id;
+      await mutate("product_save", {
+        id,
+        name,
+        unit,
+        category: "Другое",
+        minimum: 0,
+      });
+      await mutate("batch_save", {
+        id: crypto.randomUUID(),
+        product_id: id,
+        quantity,
+        unit,
+        purchased_on: day(),
+        reason: "Ручное добавление",
+      });
+    }
+    await mutate("menu_save", {
+      id: crypto.randomUUID(),
+      recipe_id: recipe.id,
+      month: day().slice(0, 7) + "-01",
+      date: day(),
+      meal: "Обед",
+      servings: 4,
+      planned_count: 1,
+      status: "Запланировано",
+    });
+    await page.goto("/menu");
+    const panel = page
+      .locator("section.panel")
+      .filter({
+        has: page.getByRole("heading", {
+          name: "Ингредиенты плана",
+          exact: true,
+        }),
+      });
+    const row = (name: string) =>
+      panel
+        .locator("tbody tr")
+        .filter({ has: page.getByText(name, { exact: true }) });
+    await expect(row("Картофель").locator("td").nth(2)).toHaveText(/^500\s*г/);
+    await expect(row("Морковь").locator("td").nth(2)).toHaveText(/^100\s*г/);
+    await expect(row("Репчатый лук").locator("td").nth(2)).toHaveText(
+      /^100\s*г/,
+    );
+    await expect(row("Отварное куриное мясо").locator("td").nth(2)).toHaveText(
+      /^200\s*г/,
+    );
+    await expect(row("Отварное куриное мясо")).toContainText(
+      "Заготовка: Курица отварная",
+    );
+    const brothRow = row("Готовый куриный бульон");
+    await expect(brothRow.locator("td").nth(2)).toHaveText(/^0\s*мл/);
+    await brothRow.locator("summary").click();
+    const brothPicker = page.getByRole("combobox", {
+      name: "Источник для Готовый куриный бульон (мл)",
+      exact: true,
+    });
+    await expect(
+      brothPicker.locator(`option[value="preparation:${expired}"]`),
+    ).toHaveCount(0);
+    await brothPicker.selectOption(`preparation:${broth}`);
+    await expect(brothRow).toContainText("Укажите пересчёт");
+    await expect(brothRow.locator("td").nth(3)).toHaveText(/^1\s*200\s*мл$/);
+    await page
+      .getByRole("spinbutton", {
+        name: "Сколько мл в 1 порц.: Готовый куриный бульон",
+        exact: true,
+      })
+      .fill("800");
+    await expect(brothRow.locator("td").nth(2)).toHaveText(/^1\s*600\s*мл/);
+    await expect(brothRow.locator("td").nth(3)).toHaveText(/^0\s*мл$/);
+    const oilRow = row("Растительное масло");
+    await expect(oilRow.locator("td").nth(2)).toHaveText(/^0\s*мл/);
+    await oilRow.locator("summary").click();
+    await page
+      .getByRole("combobox", {
+        name: "Источник для Растительное масло (мл)",
+        exact: true,
+      })
+      .selectOption(`product:${productIds["Масло подсолнечное"]}:мл`);
+    await expect(oilRow.locator("td").nth(2)).toHaveText(/^100\s*мл/);
+    await expect(oilRow.locator("td").nth(3)).toHaveText(/^0\s*мл$/);
+    await expect(row("Яичная лапша (сухая)").locator("td").nth(3)).toHaveText(
+      /^72\s*г$/,
+    );
+    await page.getByRole("button", { name: "День", exact: true }).click();
+    await expect(brothRow.locator("td").nth(2)).toHaveText(/^1\s*600\s*мл/);
+    await page.reload();
+    await expect(brothRow.locator("td").nth(2)).toHaveText(/^1\s*600\s*мл/);
+    await expect(oilRow.locator("td").nth(2)).toHaveText(/^100\s*мл/);
+    expect(
+      Number(
+        (
+          await b.query<{ quantity: number }>(
+            "select quantity from public.preparations where id=$1",
+            [broth],
+          )
+        ).rows[0].quantity,
+      ),
+    ).toBe(2);
+    expect(
+      (await b.query("select id from public.preparation_uses")).rows,
+    ).toHaveLength(0);
+    expect(
+      (await b.query("select id from public.shopping_items")).rows,
+    ).toHaveLength(0);
+    await page
+      .getByRole("button", {
+        name: "Сбросить сопоставления ингредиентов",
+        exact: true,
+      })
+      .click();
+    await expect(brothRow.locator("td").nth(2)).toHaveText(/^0\s*мл/);
+    await expect(row("Картофель").locator("td").nth(2)).toHaveText(/^500\s*г/);
+  } finally {
+    await b.close();
+  }
+});

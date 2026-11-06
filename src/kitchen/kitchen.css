@@ -209,6 +209,31 @@
   overflow: auto;
   margin-top: 20px;
 }
+.ingredient-matches {
+  margin-top: 8px;
+  min-width: 200px;
+  max-width: 380px;
+}
+.ingredient-matches summary {
+  cursor: pointer;
+  color: var(--green);
+  font-size: 12px;
+}
+.ingredient-matches label {
+  margin-top: 10px;
+  gap: 5px;
+}
+.ingredient-matches :is(input, select) {
+  min-width: 0;
+  max-width: 100%;
+}
+.ingredient-matches small,
+.ingredient-sources {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
 table {
   width: 100%;
   border-collapse: collapse;
