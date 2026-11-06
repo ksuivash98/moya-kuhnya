@@ -132,16 +132,19 @@
   gap: 18px;
 }
 @media (min-width: 1200px) {
-  .products-grid.list-layout--grid {
+  .products-grid.list-layout--grid,
+  .shopping-grid.list-layout--grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
-  .products-grid.list-layout--grid > .inventory-item {
+  .products-grid.list-layout--grid > .inventory-item,
+  .shopping-grid.list-layout--grid > .finance-item {
     min-width: 0;
     overflow-wrap: anywhere;
   }
 }
 @media (min-width: 1600px) {
-  .products-grid.list-layout--grid {
+  .products-grid.list-layout--grid,
+  .shopping-grid.list-layout--grid {
     grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 }

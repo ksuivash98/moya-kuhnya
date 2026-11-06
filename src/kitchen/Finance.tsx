@@ -417,7 +417,9 @@ export default function Finance({
               : "За выбранный месяц расходов нет."}
         </div>
       )}
-      <div className={`k-list list-layout list-layout--${layout}`}>
+      <div
+        className={`k-list ${shopping ? "shopping-grid" : ""} list-layout list-layout--${layout}`}
+      >
         {list.slice(page * 20, (page + 1) * 20).map((r) => (
           <article className="k-item finance-item" key={r.id}>
             <div className="finance-item-title">
