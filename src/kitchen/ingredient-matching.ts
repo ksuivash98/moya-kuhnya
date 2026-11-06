@@ -185,6 +185,7 @@ export type MatchedNeed = Need & {
   suggestions: InventorySource[];
   unavailable: boolean;
   conversionRequired: boolean;
+  sourceMismatch: boolean;
 };
 export function matchIngredients(
   needs: Need[],
@@ -199,15 +200,23 @@ export function matchIngredients(
       const chosen = choice
         ? sources.find((s) => s.id === choice.sourceId)
         : undefined;
+      const sourceMismatch = !!chosen && !sourceMatchesIngredient(need, chosen);
       const conversionRequired =
         !!chosen && conversionNeeded(need, chosen, choice?.ratio);
       const selected = choice
-        ? chosen && !conversionRequired
-          ? [chosen]
-          : []
+        ? sourceMismatch
+          ? sources.filter(
+              (s) =>
+                automaticMatch(need, s) && sourceMatchesIngredient(need, s),
+            )
+          : chosen && !conversionRequired
+            ? [chosen]
+            : []
         : sources.filter((s) => automaticMatch(need, s));
       const ratio =
-        chosen && chosen.unit !== need.unit ? Number(choice?.ratio) : 1;
+        chosen && !sourceMismatch && chosen.unit !== need.unit
+          ? Number(choice?.ratio)
+          : 1;
       const available = selected.reduce(
         (sum, s) => sum + (remaining.get(s.id) ?? 0) * ratio,
         0,
@@ -226,7 +235,9 @@ export function matchIngredients(
         available,
         missing: Math.max(0, need.quantity - available),
         matchedSources: selected,
+        sourceMismatch,
         suggestions: sources
+          .filter((source) => sourceMatchesIngredient(need, source))
           .map((source) => ({
             source,
             score: similarity(need.name, source.name),
@@ -319,6 +330,7 @@ export function conversionNeeded(
 }
 
 function canPropose(need: Need, source: InventorySource): boolean {
+  if (!sourceMatchesIngredient(need, source)) return false;
   const wanted = ingredientName(need.name).split(" "),
     actual = ingredientName(source.name).split(" ");
   const states = (words: string[]) =>
@@ -366,9 +378,15 @@ export function bulkIngredientSuggestions(
     const key = ingredientRuleKey(need),
       current = ingredientChoice(choices, need);
     if (seen.has(key)) continue;
-    if (current && !need.unavailable && !need.conversionRequired) continue;
+    if (
+      current &&
+      !need.unavailable &&
+      !need.conversionRequired &&
+      !need.sourceMismatch
+    )
+      continue;
     if (!current && need.matchedSources.length) continue;
-    if (current && !need.unavailable) {
+    if (current && !need.unavailable && !need.sourceMismatch) {
       seen.add(key);
       result.push({ need, choice: current });
       continue;
@@ -399,4 +417,67 @@ export function bulkIngredientSuggestions(
         .reduce((sum, n) => sum + n.quantity, 0),
     },
   }));
+}
+
+export function sourceMatchesIngredient(
+  need: Need,
+  source: InventorySource,
+): boolean {
+  const terms = (name: string) =>
+    ingredientName(name.split(/\sдля\s/i)[0]).split(" ");
+  const wanted = terms(need.name),
+    actual = terms(source.name);
+  const dishes = [
+    "бульон",
+    "суп",
+    "салат",
+    "соус",
+    "пюре",
+    "фарш",
+    "тесто",
+    "каша",
+    "котлеты",
+    "котлета",
+    "запеканка",
+    "рагу",
+    "плов",
+  ];
+  if (dishes.some((word) => actual.includes(word) && !wanted.includes(word)))
+    return false;
+  const proteins = ["курица", "говядина", "свинина", "рыба", "индейка"];
+  const wp = wanted.find((w) => proteins.includes(w)),
+    ap = actual.find((w) => proteins.includes(w));
+  if (wp && ap && wp !== ap) return false;
+  if (
+    wanted.includes("сухой") &&
+    actual.some((w) => /^(варен|жарен|готов)/.test(w))
+  )
+    return false;
+  if (
+    wanted.includes("вареный") &&
+    source.kind === "product" &&
+    !actual.includes("вареный")
+  )
+    return false;
+  if (source.kind === "preparation") {
+    const ignored = new Set([
+      "готовый",
+      "вареный",
+      "мясо",
+      "литр",
+      "литра",
+      "литров",
+      "мл",
+      "л",
+      "г",
+      "кг",
+      "порция",
+      "порции",
+      "порций",
+    ]);
+    const core = (words: string[]) =>
+      words.filter((w) => w && !ignored.has(w) && !/^\d+$/.test(w));
+    if (!core(wanted).some((w) => core(actual).includes(w))) return false;
+  }
+  return true;
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { fmt } from "./model";
 import {
   conversionNeeded,
+  sourceMatchesIngredient,
   type IngredientChoice,
   type InventorySource,
   type MatchedNeed,
@@ -58,8 +59,16 @@ export default function IngredientSourceSelect({
   emptyLabel?: string;
 }) {
   const selected = sources.find((s) => s.id === choice?.sourceId);
-  const similarIds = new Set(need.suggestions.map((s) => s.id));
-  const rest = sources.filter((s) => !similarIds.has(s.id));
+  const eligible = sources.filter((source) =>
+    sourceMatchesIngredient(need, source),
+  );
+  const mismatch = !!selected && !sourceMatchesIngredient(need, selected);
+  const similarIds = new Set(
+    need.suggestions
+      .filter((s) => sourceMatchesIngredient(need, s))
+      .map((s) => s.id),
+  );
+  const rest = eligible.filter((s) => !similarIds.has(s.id));
   const unavailable = !!choice && choice.sourceId !== "none" && !selected;
   const conversionRequired =
     !!selected && conversionNeeded(need, selected, choice?.ratio);
@@ -82,16 +91,23 @@ export default function IngredientSourceSelect({
         >
           <option value="">{emptyLabel}</option>
           <option value="none">Не учитывать для этой строки</option>
+          {mismatch && (
+            <option value={choice!.sourceId} disabled>
+              Не подходит: {selected!.name}
+            </option>
+          )}
           {unavailable && (
             <option value={choice!.sourceId}>Выбранный запас недоступен</option>
           )}
           {need.suggestions.length > 0 && (
             <optgroup label="Похожие названия — подтвердите выбор">
-              {need.suggestions.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {sourceLabel(s)}
-                </option>
-              ))}
+              {need.suggestions
+                .filter((s) => sourceMatchesIngredient(need, s))
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {sourceLabel(s)}
+                  </option>
+                ))}
             </optgroup>
           )}
           {rest.length > 0 && (
@@ -105,7 +121,7 @@ export default function IngredientSourceSelect({
           )}
         </select>
       </label>
-      {selected && selected.unit !== need.unit && (
+      {selected && !mismatch && selected.unit !== need.unit && (
         <label>
           Сколько {need.unit} в 1 {selected.unit}
           <RatioInput
@@ -121,7 +137,13 @@ export default function IngredientSourceSelect({
           />
         </label>
       )}
-      {conversionRequired && (
+      {mismatch && (
+        <small>
+          Источник не соответствует ингредиенту. Готовый суп нельзя засчитывать
+          как картофель, а бульон — как мясо.
+        </small>
+      )}
+      {!mismatch && conversionRequired && (
         <small>Укажите пересчёт, чтобы учесть этот запас.</small>
       )}
       {unavailable && (

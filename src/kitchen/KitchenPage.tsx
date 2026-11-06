@@ -3,7 +3,7 @@ import Assistant from "./Assistant";
 import Finance from "./Finance";
 import Inventory from "./Inventory";
 import { useCallback, useEffect, useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useSearchParams } from "react-router-dom";
 import { client, configured, errorText } from "../supabase";
 import { loadRecipes } from "../recipes/api";
 import type { Recipe } from "../recipes/model";
@@ -35,11 +35,21 @@ export default function KitchenPage({
   onAuth: () => void;
   notify: (s: string) => void;
 }) {
-  const [month, setMonth] = useState(today().slice(0, 7)),
+  const [params] = useSearchParams();
+  const requestedMonth = params.get("month") ?? "";
+  const [month, setMonth] = useState(
+      /^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth)
+        ? requestedMonth
+        : today().slice(0, 7),
+    ),
     [state, setState] = useState<State>(),
     [recipes, setRecipes] = useState<Recipe[]>([]),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (/^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth))
+      setMonth(requestedMonth);
+  }, [requestedMonth]);
   const { from, to } = monthRange(month);
   const reload = useCallback(async () => {
     if (!userId || !familyId) {
@@ -226,7 +236,7 @@ export default function KitchenPage({
         ) : kind === "assistant" ? (
           <Assistant {...props} />
         ) : ["shopping", "budget"].includes(kind) ? (
-          <Finance kind={kind} {...props} />
+          <Finance kind={kind} userId={userId!} {...props} />
         ) : ["products", "preparations"].includes(kind) ? (
           <Inventory kind={kind} {...props} />
         ) : (

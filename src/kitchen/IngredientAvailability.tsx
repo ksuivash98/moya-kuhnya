@@ -1,4 +1,8 @@
 import { useState } from "react";
+import {
+  ingredientChoicesKey,
+  readIngredientChoices,
+} from "./ingredient-preferences";
 import IngredientSourceSelect from "./IngredientSourceSelect";
 import IngredientBulkMatching from "./IngredientBulkMatching";
 import { fmt, type Need, type State } from "./model";
@@ -12,31 +16,6 @@ import {
   type IngredientChoices,
 } from "./ingredient-matching";
 
-function readChoices(key: string): IngredientChoices {
-  try {
-    const value = JSON.parse(localStorage.getItem(key) ?? "{}");
-    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-    const choices: IngredientChoices = {};
-    for (const [key, v] of Object.entries(value).slice(0, 1000)) {
-      const c = v as { sourceId?: unknown; ratio?: unknown };
-      if (
-        c &&
-        typeof c.sourceId === "string" &&
-        (c.ratio === undefined ||
-          (typeof c.ratio === "number" &&
-            Number.isFinite(c.ratio) &&
-            c.ratio > 0))
-      )
-        choices[key] = {
-          sourceId: c.sourceId,
-          ...(typeof c.ratio === "number" ? { ratio: c.ratio } : {}),
-        };
-    }
-    return choices;
-  } catch {
-    return {};
-  }
-}
 export default function IngredientAvailability({
   needs,
   state,
@@ -49,13 +28,15 @@ export default function IngredientAvailability({
   userId: string;
 }) {
   const [bulkOpen, setBulkOpen] = useState(false);
-  const storageKey = `kitchen-ingredient-matches:${userId}:${family}`;
+  const storageKey = ingredientChoicesKey(userId, family);
   const [stored, setStored] = useState(() => ({
     key: storageKey,
-    choices: readChoices(storageKey),
+    choices: readIngredientChoices(userId, family),
   }));
   const choices =
-    stored.key === storageKey ? stored.choices : readChoices(storageKey);
+    stored.key === storageKey
+      ? stored.choices
+      : readIngredientChoices(userId, family);
   const sources = inventorySources(state, family);
   const requirements = matchIngredients(needs, sources, choices);
   const save = (next: IngredientChoices) => {
@@ -175,8 +156,9 @@ export default function IngredientAvailability({
       </div>
       <p className="muted">
         Подбор сохраняется в этом браузере для вашего аккаунта и семьи и
-        применяется к этой таблице. Запасы и заготовки не списываются.
-        Автоматический список покупок формируется отдельно в «Покупках».
+        применяется к этой таблице и пересчёту в «Покупках». Запасы и заготовки
+        не списываются. Для обновления сохранённого списка покупок нажмите
+        «Рассчитать недостающие продукты».
       </p>
     </>
   );

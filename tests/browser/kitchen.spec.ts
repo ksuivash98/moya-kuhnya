@@ -326,7 +326,7 @@ test("единая кухня: меню → покупка → запасы → 
       })
       .click();
     const item = page.locator(".k-item").filter({
-      has: page.getByRole("heading", { name: "творог", exact: true }),
+      has: page.getByRole("heading", { name: /^творог$/i }),
     });
     await expect(item).toBeVisible();
     await item.getByRole("button", { name: "Куплено", exact: true }).click();
@@ -749,7 +749,7 @@ test("категории покупок: автоматическая подск
     });
     await generate.click();
     const item = page.locator("article.k-item").filter({
-      has: page.getByRole("heading", { name: "творог", exact: true }),
+      has: page.getByRole("heading", { name: /^творог$/i }),
     });
     await expect(item.locator(".pill")).toHaveText("Молочные продукты");
     await item
@@ -2417,6 +2417,82 @@ test("ингредиенты меню: похожие продукты, заго
     expect(
       (await b.query("select id from public.shopping_items")).rows,
     ).toHaveLength(0);
+    // Reproduce legacy server-generated rows, plus manual items and paid history.
+    await mutate("shopping_generate", { month: day().slice(0, 7) + "-01" });
+    const noodles = (
+      await b.query<{ id: string }>(
+        "select id from public.products where lower(name)='яичная лапша (сухая)'",
+      )
+    ).rows[0].id;
+    const manualNoodles = crypto.randomUUID(),
+      manualCarrot = crypto.randomUUID(),
+      paid = crypto.randomUUID();
+    for (const [id, product_id, quantity, unit] of [
+      [manualNoodles, noodles, 50, "г"],
+      [manualCarrot, productIds["Моркови"], 2, "шт."],
+      [paid, productIds["Лук"], 10, "г"],
+    ] as const)
+      await mutate("shopping_save", {
+        id,
+        product_id,
+        quantity,
+        unit,
+        month: day().slice(0, 7) + "-01",
+        status: "open",
+      });
+    await mutate("purchase_confirm", {
+      id: paid,
+      version: 1,
+      quantity: 10,
+      unit: "г",
+      amount: 5,
+      date: day(),
+    });
+    await page.getByRole("button", { name: "День", exact: true }).click();
+    await panel
+      .getByRole("link", { name: "Открыть покупки для этого периода" })
+      .click();
+    await expect(page).toHaveURL(/plan_from=/);
+    const calculate = page.getByRole("button", {
+      name: "Рассчитать недостающие продукты",
+    });
+    await calculate.click();
+    await expect(calculate).toBeEnabled();
+    const openRows = () =>
+      b.query<{ id: string; quantity: string; product_id: string }>(
+        "select id,quantity,product_id from public.shopping_items where status='open' order by id",
+      );
+    const first = (await openRows()).rows;
+    expect(first).toHaveLength(3);
+    expect(
+      first
+        .filter((r) => r.product_id === noodles)
+        .map((r) => Number(r.quantity))
+        .sort((a, b) => a - b),
+    ).toEqual([22, 50]);
+    expect(first.some((r) => r.id === manualCarrot)).toBe(true);
+    expect(
+      (
+        await b.query(
+          "select id from public.purchases where shopping_item_id=$1",
+          [paid],
+        )
+      ).rows,
+    ).toHaveLength(1);
+    await calculate.click();
+    await expect(calculate).toBeEnabled();
+    expect((await openRows()).rows).toEqual(first);
+    expect(
+      Number(
+        (
+          await b.query<{ quantity: string }>(
+            "select quantity from public.preparations where id=$1",
+            [broth],
+          )
+        ).rows[0].quantity,
+      ),
+    ).toBe(2);
+    await page.goto("/menu");
     await page
       .getByRole("button", {
         name: "Сбросить сопоставления ингредиентов",
@@ -2574,6 +2650,46 @@ test("общий подбор меню: готовые предложения, �
     expect(
       (await b.query("select id from public.shopping_items")).rows,
     ).toHaveLength(0);
+  } finally {
+    await b.close();
+  }
+});
+
+test("покупки из рецепта: единый расчёт, категория и повтор без дублирования плана", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const recipe = await b.save("Рецепт для покупок напрямую");
+    await page.goto(`/shopping?recipe=${recipe.id}&servings=4`);
+    const add = page.getByRole("button", {
+      name: "Добавить потребность в список",
+      exact: true,
+    });
+    await add.click();
+    const item = page
+      .locator("article.k-item")
+      .filter({ has: page.getByRole("heading", { name: /^творог$/i }) });
+    await expect(item).toBeVisible();
+    await expect(item.locator(".pill")).toHaveText("Молочные продукты");
+    await expect(add).toBeEnabled();
+    const before = (
+      await b.query(
+        "select id,quantity from public.shopping_items where status='open'",
+      )
+    ).rows;
+    await add.click();
+    await expect(add).toBeEnabled();
+    expect(
+      (
+        await b.query(
+          "select id,quantity from public.shopping_items where status='open'",
+        )
+      ).rows,
+    ).toEqual(before);
+    expect(
+      (await b.query("select id from public.menu_items")).rows,
+    ).toHaveLength(1);
   } finally {
     await b.close();
   }

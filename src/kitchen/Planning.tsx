@@ -6,6 +6,7 @@ import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import Fields, { type Field } from "./Fields";
 import RecipePicker from "./RecipePicker";
 import IngredientAvailability from "./IngredientAvailability";
+import { planRequirements } from "./plan-requirements";
 import Modal from "../components/Modal";
 import {
   type State,
@@ -22,7 +23,6 @@ import {
   addDays,
   snapshot,
   ingredients,
-  needs,
   fmt,
 } from "./model";
 import { mutate } from "./api";
@@ -508,27 +508,13 @@ export default function Planning({
     days = Array.from({ length: 7 }, (_, i) => addDays(anchor, i - day));
   }
   if (mode === "День") days = [anchor];
-  const selectedDays = new Set(days);
   const datedPeriod = mode === "Неделя" || mode === "День";
-  const inSelectedPeriod = (r: Row) => selectedDays.has(str(r, "date"));
-  const requirements = needs(
-    state,
-    datedPeriod
-      ? [
-          ...(kind === "menu"
-            ? rows(state, "menu_items").filter(inSelectedPeriod)
-            : []),
-          ...rows(state, "cooking_tasks").filter(inSelectedPeriod),
-        ]
-      : kind === "cooking"
-        ? tasks
-        : [
-            ...menu,
-            ...rows(state, "cooking_tasks").filter((t) =>
-              str(t, "date").startsWith(month),
-            ),
-          ],
-  );
+  const scope = {
+    month,
+    kind: kind === "cooking" ? ("cooking" as const) : ("menu" as const),
+    ...(datedPeriod ? { from: days[0], to: days[days.length - 1] } : {}),
+  };
+  const requirements = planRequirements(state, scope);
   return (
     <>
       <div className="k-toolbar">
@@ -736,6 +722,11 @@ export default function Planning({
           Единицы г/кг и мл/л объединяются; остальные считаются отдельно. «По
           вкусу» уточните при готовке. Просроченные партии не учитываются.
         </p>
+        <NavLink
+          to={`/shopping?${new URLSearchParams({ month, plan_kind: scope.kind, ...(scope.from && scope.to ? { plan_from: scope.from, plan_to: scope.to } : {}) })}`}
+        >
+          Открыть покупки для этого периода
+        </NavLink>
         {requirements.length ? (
           <IngredientAvailability
             needs={requirements}

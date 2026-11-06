@@ -153,6 +153,7 @@ export async function recipeBackend(
             body = req.postDataJSON() as Record<string, unknown>;
           const keys: Record<string, string[]> = {
             kitchen_mutate: ["p_family", "p_key", "p_action", "p_data"],
+            suggest_product_category: ["p_name"],
             refresh_kitchen_notifications: ["p_family"],
             claim_kitchen_notifications: ["p_family"],
             get_kitchen_state: ["p_family", "p_from", "p_to", "p_offset"],

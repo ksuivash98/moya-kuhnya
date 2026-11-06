@@ -5,7 +5,10 @@ import type { ModuleProps } from "./KitchenPage";
 import Modal from "../components/Modal";
 import Fields, { type Field } from "./Fields";
 import ProductPicker from "./ProductPicker";
-import { mutate } from "./api";
+import { loadKitchen, mutate } from "./api";
+import { syncShopping } from "./sync-shopping";
+import { stableShoppingId } from "./shopping-reconciliation";
+import type { PlanScope } from "./plan-requirements";
 import {
   rows,
   str,
@@ -21,14 +24,36 @@ import {
 import { errorText } from "../supabase";
 export default function Finance({
   kind,
+  userId,
   state,
   family,
   canEdit,
   month,
   reload,
   notify,
-}: ModuleProps & { kind: string }) {
+}: ModuleProps & { kind: string; userId: string }) {
   const [params] = useSearchParams();
+  const from = params.get("plan_from") ?? "",
+    to = params.get("plan_to") ?? "";
+  const dated =
+    /^\d{4}-\d{2}-\d{2}$/.test(from) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(to) &&
+    from <= to &&
+    to >= month + "-01" &&
+    from <= monthRange(month).to &&
+    Number.isFinite(Date.parse(from)) &&
+    Number.isFinite(Date.parse(to)) &&
+    (Date.parse(to) - Date.parse(from)) / 86400000 <= 31;
+  const planKind = params.get("plan_kind");
+  const scope: PlanScope = {
+    month,
+    ...(dated ? { from, to } : {}),
+    ...(planKind === "menu" || planKind === "cooking"
+      ? { kind: planKind }
+      : {}),
+  };
+  const [calculationWarnings, setCalculationWarnings] = useState<string[]>([]);
+  useEffect(() => setCalculationWarnings([]), [month, from, to, planKind]);
   const [layout, setLayout] = useListLayout(kind);
   const [category, setCategory] = useState("");
   const [productBusy, setProductBusy] = useState(false);
@@ -237,16 +262,20 @@ export default function Finance({
   async function generate() {
     setBusy(true);
     try {
-      await mutate(
-        family,
-        "shopping_generate",
-        { month: month + "-01" },
-        crypto.randomUUID(),
-      );
+      const result = await syncShopping(family, userId, scope);
+      setCalculationWarnings(result.warnings);
       await reload();
-      notify("Список пересчитан по меню и плану. История покупок сохранена.");
+      setPage(0);
+      notify(
+        result.warnings.length
+          ? "Список пересчитан. Проверьте позиции с разными единицами ниже."
+          : "Список пересчитан с учётом запасов и заготовок. История покупок сохранена.",
+      );
     } catch (e) {
-      notify(errorText(e));
+      await reload();
+      notify(
+        `Пересчёт не завершён: ${errorText(e)} Повторите расчёт после обновления данных.`,
+      );
     } finally {
       setBusy(false);
     }
@@ -282,16 +311,52 @@ export default function Finance({
             onClick={async () => {
               setBusy(true);
               try {
-                await mutate(
-                  family,
-                  "shopping_recipe",
-                  {
-                    recipe_id: params.get("recipe"),
-                    servings: params.get("servings") || 4,
-                    month: month + "-01",
-                  },
-                  crypto.randomUUID(),
+                const range = monthRange(month);
+                const fresh = await loadKitchen(family, range.from, range.to);
+                const recipeId = params.get("recipe")!;
+                const planned = [
+                  ...rows(fresh, "menu_items"),
+                  ...rows(fresh, "cooking_tasks"),
+                ].some(
+                  (r) =>
+                    r.recipe_id === recipeId &&
+                    (str(r, "month").startsWith(month) ||
+                      str(r, "date").startsWith(month)) &&
+                    ![
+                      "Отменено",
+                      "Приготовлено",
+                      "Сделана заготовка",
+                      "Приготовлено из заготовки",
+                    ].includes(str(r, "status")),
                 );
+                if (!planned)
+                  await mutate(
+                    family,
+                    "menu_save",
+                    {
+                      id: await stableShoppingId(
+                        "recipe-plan",
+                        `${family}:${month}:${recipeId}:${[
+                          ...rows(fresh, "menu_items"),
+                          ...rows(fresh, "cooking_tasks"),
+                        ]
+                          .filter((r) => r.recipe_id === recipeId)
+                          .map((r) => r.id)
+                          .sort()
+                          .join(",")}`,
+                      ),
+                      recipe_id: recipeId,
+                      servings: params.get("servings") || 4,
+                      month: month + "-01",
+                      date: "",
+                      meal: "Другое",
+                      planned_count: 1,
+                      status: "Запланировано",
+                    },
+                    crypto.randomUUID(),
+                  );
+                const result = await syncShopping(family, userId, { month });
+                setCalculationWarnings(result.warnings);
                 await reload();
                 notify("План и покупки обновлены.");
               } catch (e) {
@@ -303,6 +368,25 @@ export default function Finance({
           >
             Добавить потребность в список
           </button>
+        </div>
+      )}
+      {shopping && (
+        <p className="muted">
+          Расчёт: {dated ? `${from} — ${to}` : `месяц ${month}`}
+          {scope.kind === "menu"
+            ? ", меню"
+            : scope.kind === "cooking"
+              ? ", план приготовления"
+              : ", меню и план приготовления"}
+          . Учитываются запасы, заготовки и подбор продуктов из меню в этом
+          браузере. Старые автоматические строки обновятся при пересчёте.
+        </p>
+      )}
+      {shopping && calculationWarnings.length > 0 && (
+        <div className="notice" role="status">
+          {calculationWarnings.map((w) => (
+            <p key={w}>{w}</p>
+          ))}
         </div>
       )}
       {!shopping && (
@@ -379,7 +463,7 @@ export default function Finance({
       </div>
       <p className="muted">
         {shopping
-          ? "Список учитывает незавершённые блюда и совместимые единицы. Фактическая покупка одновременно создаёт партию и расход. Новые продукты для ручного списка добавляются в разделе «Продукты»."
+          ? "Список учитывает незавершённые блюда и совместимые единицы. Фактическая покупка одновременно создаёт партию и расход. Новый продукт можно создать через «Добавить вручную»."
           : "Все суммы рассчитаны по финансовому журналу. Корректировки сохраняют прежние записи и создают компенсации; прогноз — пропорция текущих расходов по дням, а не обещание."}
       </p>
       <div className="list-options">
