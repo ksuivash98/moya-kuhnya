@@ -10,6 +10,28 @@
   justify-content: space-between;
   margin: 20px 0;
 }
+.planning-periods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  max-width: 100%;
+}
+.planning-periods button {
+  min-height: 42px;
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.planning-periods button.active {
+  background: var(--green);
+  border-color: var(--green);
+  color: var(--on-green);
+}
 .k-date-nav {
   margin: 16px 0;
 }

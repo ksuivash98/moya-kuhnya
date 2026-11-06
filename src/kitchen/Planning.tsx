@@ -525,7 +525,11 @@ export default function Planning({
   return (
     <>
       <div className="k-toolbar">
-        <div className="recipe-filters">
+        <div
+          className="planning-periods"
+          role="group"
+          aria-label="Период планирования"
+        >
           {(kind === "menu"
             ? ["Месяц", "Неделя", "День", "Список", "Список без дат"]
             : ["Список", "Неделя", "День"]
@@ -533,6 +537,7 @@ export default function Planning({
             <button
               key={m}
               className={mode === m ? "active" : ""}
+              aria-pressed={mode === m}
               onClick={() => setMode(m)}
             >
               {m}

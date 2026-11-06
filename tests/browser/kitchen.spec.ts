@@ -1940,3 +1940,85 @@ for (const kind of ["menu", "cooking"])
       await b.close();
     }
   });
+
+for (const kind of ["menu", "cooking"])
+  test(`периоды ${kind}: прямое открытие без рецептов, отступы и перенос кнопок`, async ({
+    page,
+  }) => {
+    const b = await recipeBackend(page);
+    try {
+      await b.save("Рецепт для проверки периодов");
+      await page.goto("/" + kind);
+      const periods = page.getByRole("group", {
+        name: "Период планирования",
+        exact: true,
+      });
+      await expect(periods).toBeVisible();
+      await expect(periods.getByRole("button")).toHaveCount(
+        kind === "menu" ? 5 : 3,
+      );
+      for (const theme of ["light", "dark"]) {
+        if ((await page.locator("html").getAttribute("data-theme")) !== theme) {
+          await page
+            .getByRole("button", {
+              name:
+                theme === "dark"
+                  ? "Включить тёмную тему"
+                  : "Включить светлую тему",
+              exact: true,
+            })
+            .click();
+        }
+        for (const width of [320, 390, 768, 1440]) {
+          await page.setViewportSize({ width, height: 900 });
+          const layout = await periods.evaluate((el) => {
+            const style = getComputedStyle(el);
+            return {
+              display: style.display,
+              wrap: style.flexWrap,
+              gap: parseFloat(style.columnGap),
+              buttons: [...el.querySelectorAll("button")].map((b) => {
+                const r = b.getBoundingClientRect();
+                return {
+                  x: r.x,
+                  y: r.y,
+                  width: r.width,
+                  height: r.height,
+                  border: parseFloat(getComputedStyle(b).borderTopWidth),
+                };
+              }),
+              overflow: document.documentElement.scrollWidth > innerWidth,
+            };
+          });
+          expect(layout.display).toBe("flex");
+          expect(layout.wrap).toBe("wrap");
+          expect(layout.gap).toBeGreaterThanOrEqual(8);
+          expect(layout.overflow).toBe(false);
+          for (const [i, rect] of layout.buttons.entries()) {
+            expect(rect.height).toBeGreaterThanOrEqual(42);
+            expect(rect.border).toBeGreaterThan(0);
+            expect(rect.x + rect.width).toBeLessThanOrEqual(width);
+            if (i && Math.abs(layout.buttons[i - 1].y - rect.y) < 1)
+              expect(
+                rect.x - layout.buttons[i - 1].x - layout.buttons[i - 1].width,
+              ).toBeGreaterThanOrEqual(8);
+          }
+        }
+        await periods
+          .getByRole("button", { name: "Неделя", exact: true })
+          .click();
+        await expect(
+          periods.getByRole("button", { name: "Неделя", exact: true }),
+        ).toHaveAttribute("aria-pressed", "true");
+        await periods
+          .getByRole("button", { name: "День", exact: true })
+          .click();
+        await expect(
+          periods.getByRole("button", { name: "День", exact: true }),
+        ).toHaveAttribute("aria-pressed", "true");
+        await expect(periods.locator("[aria-pressed=true]")).toHaveCount(1);
+      }
+    } finally {
+      await b.close();
+    }
+  });
