@@ -6,6 +6,10 @@ import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import Fields, { type Field } from "./Fields";
 import RecipePicker from "./RecipePicker";
 import IngredientAvailability from "./IngredientAvailability";
+import IngredientSourceSelect from "./IngredientSourceSelect";
+import { readIngredientChoices } from "./ingredient-preferences";
+import { ingredientChoice, setIngredientChoice } from "./ingredient-matching";
+import { cookingSources } from "./cooking-sources";
 import { planRequirements } from "./plan-requirements";
 import Modal from "../components/Modal";
 import {
@@ -884,6 +888,8 @@ export default function Planning({
         <CookingConfirm
           row={cooking}
           family={family}
+          state={state}
+          userId={userId}
           onClose={() => setCooking(null)}
           onSaved={async () => {
             setCooking(null);
@@ -900,11 +906,15 @@ export default function Planning({
 function CookingConfirm({
   row,
   family,
+  state,
+  userId,
   onClose,
   onSaved,
 }: {
   row: Row;
   family: string;
+  state: State;
+  userId: string;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
@@ -924,6 +934,10 @@ function CookingConfirm({
             ),
     })),
   );
+  const [choices, setChoices] = useState(() =>
+    readIngredientChoices(userId, family),
+  );
+  const actual = cookingSources(state, family, usage, choices);
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [key] = useState(crypto.randomUUID());
@@ -940,15 +954,25 @@ function CookingConfirm({
           setError("");
           const f = new FormData(e.currentTarget);
           try {
+            if (actual.errors.length) throw new Error(actual.errors.join(" "));
+            if (state.schema_version < 16 && actual.requiresPreparation)
+              throw new Error(
+                "Для списания заготовок требуется серверное обновление 016 в Supabase. Приготовление не сохранено, остатки не изменены.",
+              );
             await mutate(
               family,
-              "cook_confirm",
+              state.schema_version >= 16
+                ? "cook_confirm_sources"
+                : "cook_confirm",
               {
                 ...Object.fromEntries(f),
                 task_id: row.checked_steps !== undefined ? row.id : "",
                 menu_id: row.checked_steps === undefined ? row.id : row.menu_id,
                 version: row.version,
-                usage,
+                usage:
+                  state.schema_version >= 16
+                    ? actual.allocations
+                    : actual.legacyUsage,
                 usage_confirmed: true,
               },
               key,
@@ -1002,9 +1026,11 @@ function CookingConfirm({
           </p>
           <h3>Проверьте фактический расход</h3>
           <p className="muted">
-            Если продукт не использован, явно укажите 0. Количество «по вкусу»
-            автоматически не списывается. При нехватке пополните запасы или
-            укажите фактический расход.
+            Проверьте количество и источник каждого ингредиента. Сохранённый
+            подбор из меню уже применён; здесь источник можно изменить для этого
+            приготовления. Заготовка списывается из своего остатка, её исходные
+            ингредиенты повторно не расходуются. Для неиспользованного
+            ингредиента укажите 0. «По вкусу» автоматически не списывается.
           </p>
           {usage.map((u, index) => (
             <div key={index} className="k-usage-row">
@@ -1051,8 +1077,50 @@ function CookingConfirm({
                   ))}
                 </select>
               </label>
+              <div className="cooking-ingredient-source">
+                <IngredientSourceSelect
+                  need={actual.matchedByRow[index]}
+                  sources={actual.sources}
+                  choice={ingredientChoice(choices, actual.matchedByRow[index])}
+                  onChange={(choice) =>
+                    setChoices((current) =>
+                      setIngredientChoice(
+                        current,
+                        actual.matchedByRow[index],
+                        choice,
+                      ),
+                    )
+                  }
+                />
+                {actual.allocations[index].sources.map((source, part) => (
+                  <p className="muted" key={part}>
+                    Будет списано:{" "}
+                    {source.kind === "preparation" ? "заготовка" : "продукт"} «
+                    {
+                      actual.sources.find(
+                        (s) =>
+                          s.id ===
+                          `${source.kind}:${source.id}${source.kind === "product" ? ":" + source.unit : ""}`,
+                      )?.name
+                    }
+                    » — {fmt(Number(source.quantity))} {source.unit}
+                  </p>
+                ))}
+                {actual.matchedByRow[index].missing > 0 && (
+                  <p className="error">
+                    Не хватает: {fmt(actual.matchedByRow[index].missing)}{" "}
+                    {actual.matchedByRow[index].unit}
+                  </p>
+                )}
+              </div>
             </div>
           ))}
+          {state.schema_version < 16 && actual.requiresPreparation && (
+            <p className="notice">
+              Для списания заготовок необходимо серверное обновление 016 в
+              Supabase.
+            </p>
+          )}
           <label>
             Примечания
             <textarea name="notes" />

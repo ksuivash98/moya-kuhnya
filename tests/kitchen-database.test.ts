@@ -45,6 +45,7 @@ beforeAll(async () => {
     "202610310013_clear_planning.sql",
     "202611010014_recipe_categories.sql",
     "202611010015_recipe_multiple_categories.sql",
+    "202611060016_cooking_sources.sql",
   ]) {
     if (file === "202610310011_shopping_categories.sql")
       await db.exec(`
@@ -1048,4 +1049,292 @@ test("удаление продукта сохраняет историю, за�
   expect(
     await scalar("select archived from public.products where id=$1", [id]),
   ).toBe(false);
+});
+
+async function cookingSourcesFixture() {
+  await user();
+  const preparation = crypto.randomUUID(),
+    product = crypto.randomUUID(),
+    batch = crypto.randomUUID(),
+    plan = crypto.randomUUID();
+  await op("prep_save", {
+    id: preparation,
+    title: "Куриный бульон для источников " + preparation,
+    quantity: 1500,
+    unit: "мл",
+    prepared_on: "2026-01-01",
+    expires_on: "2099-01-01",
+  });
+  await op("product_save", {
+    id: product,
+    name: "Морковка для источников " + product,
+    unit: "г",
+    minimum: 0,
+  });
+  await op("batch_save", {
+    id: batch,
+    product_id: product,
+    quantity: 100,
+    unit: "г",
+    purchased_on: "2026-01-01",
+    reason: "Ручное добавление",
+  });
+  await op("menu_save", {
+    id: plan,
+    recipe_id: recipe,
+    month: "2099-01-01",
+    date: "2099-01-02",
+    meal: "Обед",
+    servings: 4,
+    planned_count: 1,
+    status: "Запланировано",
+  });
+  const payload = {
+    menu_id: plan,
+    version: 1,
+    date: "2099-01-02",
+    servings: 4,
+    eaten: 2,
+    fridge: 1,
+    frozen: 1,
+    usage_confirmed: true,
+    usage: [
+      {
+        name: "Готовый куриный бульон",
+        amount: "1200",
+        unit: "мл",
+        sources: [
+          {
+            kind: "preparation",
+            id: preparation,
+            quantity: "1200",
+            unit: "мл",
+            ratio: "1",
+            version: 1,
+          },
+        ],
+      },
+      {
+        name: "Морковь",
+        amount: "60",
+        unit: "г",
+        sources: [
+          {
+            kind: "product",
+            version: 1,
+            id: product,
+            quantity: "60",
+            unit: "г",
+            ratio: "1",
+          },
+        ],
+      },
+    ],
+  };
+  return { preparation, product, batch, plan, payload };
+}
+test("подтверждение с источниками: бульон из заготовки и похожий продукт списываются атомарно и ровно один раз", async () => {
+  const f = await cookingSourcesFixture(),
+    key = crypto.randomUUID();
+  await op("cook_confirm_sources", f.payload, key);
+  await op("cook_confirm_sources", f.payload, key);
+  expect(
+    Number(
+      await scalar("select quantity from public.preparations where id=$1", [
+        f.preparation,
+      ]),
+    ),
+  ).toBe(300);
+  expect(
+    Number(
+      await scalar("select quantity from public.stock_batches where id=$1", [
+        f.batch,
+      ]),
+    ),
+  ).toBe(40);
+  expect(
+    Number(
+      await scalar(
+        "select count(*) from public.preparation_movements where preparation_id=$1 and reason='Ингредиент блюда'",
+        [f.preparation],
+      ),
+    ),
+  ).toBe(1);
+  expect(Number(await scalar("select kitchen_menu_done($1)", [f.plan]))).toBe(
+    1,
+  );
+  expect(
+    Number(
+      await scalar(
+        "select count(*) from public.preparation_uses where preparation_id=$1",
+        [f.preparation],
+      ),
+    ),
+  ).toBe(0);
+  const history = (await scalar(
+    "select usage from public.cooking_events where menu_id=$1",
+    [f.plan],
+  )) as { name: string; sources: { name: string; quantity: number }[] }[];
+  expect(history[0].name).toBe("Готовый куриный бульон");
+  expect(history[0].sources[0].name).toContain("Куриный бульон для источников");
+  expect(Number(history[0].sources[0].quantity)).toBe(1200);
+  expect(
+    Number(
+      await scalar(
+        "select count(*) from public.preparations where event_id=(select id from public.cooking_events where menu_id=$1)",
+        [f.plan],
+      ),
+    ),
+  ).toBe(2);
+});
+test("ошибка в одном ингредиенте откатывает заготовки, продукты, событие и распределение порций", async () => {
+  const f = await cookingSourcesFixture();
+  f.payload.usage[1].amount = "200";
+  f.payload.usage[1].sources[0].quantity = "200";
+  await expect(op("cook_confirm_sources", f.payload)).rejects.toThrow(
+    "Недостаточно",
+  );
+  expect(
+    Number(
+      await scalar("select quantity from public.preparations where id=$1", [
+        f.preparation,
+      ]),
+    ),
+  ).toBe(1500);
+  expect(
+    Number(
+      await scalar("select quantity from public.stock_batches where id=$1", [
+        f.batch,
+      ]),
+    ),
+  ).toBe(100);
+  expect(
+    Number(
+      await scalar(
+        "select count(*) from public.cooking_events where menu_id=$1",
+        [f.plan],
+      ),
+    ),
+  ).toBe(0);
+  expect(
+    Number(
+      await scalar(
+        "select count(*) from public.preparation_movements where preparation_id=$1 and reason='Ингредиент блюда'",
+        [f.preparation],
+      ),
+    ),
+  ).toBe(0);
+});
+test("источники проверяют доступ, версии, просрочку, покрытие и общий расход заготовки", async () => {
+  const f = await cookingSourcesFixture();
+  const foreign = crypto.randomUUID();
+  await db.exec("reset role");
+  await db.query(
+    "insert into public.preparations(id,family_id,title,quantity,unit,prepared_on,expires_on)values($1,'dddddddd-dddd-4ddd-8ddd-dddddddddddd','Чужой бульон',1500,'мл','2026-01-01','2099-01-01')",
+    [foreign],
+  );
+  await user();
+  const foreignPayload = structuredClone(f.payload);
+  foreignPayload.usage[0].sources[0].id = foreign;
+  await expect(op("cook_confirm_sources", foreignPayload)).rejects.toThrow(
+    "заготовка недоступна",
+  );
+  const stale = structuredClone(f.payload);
+  stale.usage[0].sources[0].version = 0;
+  await expect(op("cook_confirm_sources", stale)).rejects.toThrow(
+    "Заготовка изменена",
+  );
+  const uncovered = structuredClone(f.payload);
+  uncovered.usage[0].sources[0].quantity = "1";
+  await expect(op("cook_confirm_sources", uncovered)).rejects.toThrow(
+    "не покрывают",
+  );
+  const repeated = structuredClone(f.payload);
+  repeated.usage.push(structuredClone(repeated.usage[0]));
+  await expect(op("cook_confirm_sources", repeated)).rejects.toThrow(
+    "Недостаточно заготовки",
+  );
+  await user(other);
+  await expect(op("cook_confirm_sources", f.payload)).rejects.toThrow(
+    "Нет права",
+  );
+  await expect(
+    scalar("select public._cooking_confirm_sources($1,$2,$3)", [
+      family,
+      crypto.randomUUID(),
+      f.payload,
+    ]),
+  ).rejects.toThrow("permission denied");
+  await user();
+  await op("prep_save", {
+    id: f.preparation,
+    version: 1,
+    title: "Просроченный бульон",
+    quantity: 1500,
+    unit: "мл",
+    prepared_on: "2000-01-01",
+    expires_on: "2001-01-01",
+  });
+  f.payload.usage[0].sources[0].version = 2;
+  await expect(op("cook_confirm_sources", f.payload)).rejects.toThrow("истёк");
+  expect(
+    Number(
+      await scalar("select quantity from public.preparations where id=$1", [
+        f.preparation,
+      ]),
+    ),
+  ).toBe(1500);
+});
+test("заготовка в порциях: явный коэффициент, суммарное списание и исходная единица в журнале", async () => {
+  const f = await cookingSourcesFixture();
+  const prep = crypto.randomUUID();
+  await op("prep_save", {
+    id: prep,
+    title: "Бульон порциями",
+    quantity: 2,
+    unit: "порц.",
+    prepared_on: "2026-01-01",
+    expires_on: "2099-01-01",
+  });
+  const data = {
+    ...f.payload,
+    usage: [
+      {
+        name: "Готовый куриный бульон",
+        amount: "1200",
+        unit: "мл",
+        sources: [
+          {
+            kind: "preparation",
+            id: prep,
+            quantity: "1.5",
+            unit: "порц.",
+            ratio: "800",
+            version: 1,
+          },
+        ],
+      },
+    ],
+  };
+  const noRatio = structuredClone(data);
+  noRatio.usage[0].sources[0].ratio = "0";
+  await expect(op("cook_confirm_sources", noRatio)).rejects.toThrow(
+    "положительный",
+  );
+  await op("cook_confirm_sources", data);
+  expect(
+    Number(
+      await scalar("select quantity from public.preparations where id=$1", [
+        prep,
+      ]),
+    ),
+  ).toBe(0.5);
+  expect(
+    Number(
+      await scalar(
+        "select quantity from public.preparation_movements where preparation_id=$1 and reason='Ингредиент блюда'",
+        [prep],
+      ),
+    ),
+  ).toBe(-1.5);
 });

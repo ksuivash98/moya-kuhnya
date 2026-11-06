@@ -652,3 +652,10 @@ details .checkbox-label {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.cooking-ingredient-source {
+  grid-column: 1 / -1;
+}
+.cooking-ingredient-source p {
+  margin: 6px 0;
+}
