@@ -12,6 +12,7 @@ import IngredientBulkMatching from "./IngredientBulkMatching";
 import { fmt, type Need, type State } from "./model";
 import {
   ingredientKey,
+  automaticSourceConversion,
   ingredientChoice,
   ingredientRuleKey,
   setIngredientChoice,
@@ -119,6 +120,17 @@ export default function IngredientAvailability({
             <tbody key={group.key} aria-label={`Ингредиент: ${group.name}`}>
               {group.needs.map((n, index) => {
                 const key = ingredientKey(n);
+                const choice = ingredientChoice(choices, n);
+                const automaticNotes = n.matchedSources.flatMap((source) => {
+                  if (
+                    source.unit === n.unit ||
+                    (choice?.sourceId === source.id &&
+                      choice.ratio !== undefined)
+                  )
+                    return [];
+                  const converted = automaticSourceConversion(n, source);
+                  return converted?.approximate ? [converted.description] : [];
+                });
                 return (
                   <tr key={key}>
                     {index === 0 && (
@@ -159,6 +171,13 @@ export default function IngredientAvailability({
                     </td>
                     <td>
                       {fmt(n.available)} {n.unit}
+                      {automaticNotes.length > 0 && (
+                        <small className="ingredient-sources">
+                          Автопересчёт:{" "}
+                          {[...new Set(automaticNotes)].join("; ")}. Значения
+                          ориентировочные.
+                        </small>
+                      )}
                       {n.matchedSources.length > 0 && (
                         <small className="ingredient-sources">
                           {[

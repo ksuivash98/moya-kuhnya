@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { fmt } from "./model";
+import { isSpoon } from "./unit-conversion";
 import {
   conversionNeeded,
+  automaticSourceConversion,
   sourceMatchesIngredient,
   type IngredientChoice,
   type InventorySource,
@@ -21,7 +23,10 @@ function RatioInput({
   const [text, setText] = useState(ratio === undefined ? "" : String(ratio));
   const sent = useRef<{ ratio: number | undefined } | undefined>(undefined);
   useEffect(() => {
-    if (sent.current && Object.is(sent.current.ratio, ratio)) {
+    if (
+      sent.current &&
+      (sent.current.ratio === undefined || Object.is(sent.current.ratio, ratio))
+    ) {
       sent.current = undefined;
       return;
     }
@@ -35,6 +40,10 @@ function RatioInput({
       step="any"
       aria-label={label}
       value={text}
+      onBlur={() => {
+        if (!Number.isFinite(Number(text)) || Number(text) <= 0)
+          setText(ratio === undefined ? "" : String(ratio));
+      }}
       onChange={(e) => {
         setText(e.target.value);
         const n = e.target.valueAsNumber;
@@ -59,6 +68,19 @@ export default function IngredientSourceSelect({
   emptyLabel?: string;
 }) {
   const selected = sources.find((s) => s.id === choice?.sourceId);
+  const effective =
+    selected ??
+    (!choice && need.matchedSources.length === 1
+      ? need.matchedSources[0]
+      : undefined);
+  const automatic = effective
+    ? automaticSourceConversion(need, effective)
+    : undefined;
+  const resolved = choice?.ratio ?? automatic?.ratio;
+  const reverse =
+    !!effective && isSpoon(need.unit) && ["г", "мл"].includes(effective.unit);
+  const inputUnit = reverse ? effective!.unit : need.unit;
+  const sourceUnit = reverse ? need.unit : effective?.unit;
   const eligible = sources.filter((source) =>
     sourceMatchesIngredient(need, source),
   );
@@ -121,22 +143,44 @@ export default function IngredientSourceSelect({
           )}
         </select>
       </label>
-      {selected && !mismatch && selected.unit !== need.unit && (
+      {effective && !mismatch && effective.unit !== need.unit && (
         <label>
-          Сколько {need.unit} в 1 {selected.unit}
+          Сколько {inputUnit} в 1 {sourceUnit}
           <RatioInput
-            key={selected.id}
-            ratio={choice?.ratio}
-            label={`Сколько ${need.unit} в 1 ${selected.unit}: ${need.name}`}
+            key={effective.id}
+            ratio={
+              resolved === undefined
+                ? undefined
+                : reverse
+                  ? 1 / resolved
+                  : resolved
+            }
+            label={`Сколько ${inputUnit} в 1 ${sourceUnit}: ${need.name}`}
             onChange={(ratio) =>
               onChange({
-                sourceId: selected.id,
-                ...(ratio === undefined ? {} : { ratio }),
+                sourceId: effective.id,
+                ...(ratio === undefined
+                  ? {}
+                  : { ratio: reverse ? 1 / ratio : ratio }),
               })
             }
           />
         </label>
       )}
+      {effective &&
+        !mismatch &&
+        effective.unit !== need.unit &&
+        choice?.ratio === undefined &&
+        automatic && (
+          <small className="automatic-conversion-note">
+            Автопересчёт: {automatic.description}.{" "}
+            {automatic.approximate
+              ? isSpoon(need.unit) || isSpoon(effective.unit)
+                ? "Ориентировочное значение для мерной ложки без горки; можно поправить вручную."
+                : "Ориентировочная плотность продукта; можно поправить вручную."
+              : "Можно поправить вручную."}
+          </small>
+        )}
       {mismatch && (
         <small>
           Источник не соответствует ингредиенту. Готовый суп нельзя засчитывать

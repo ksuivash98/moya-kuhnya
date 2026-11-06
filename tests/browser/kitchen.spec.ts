@@ -3025,3 +3025,143 @@ test("ингредиенты плана: одинаковое масло сум�
     await b.close();
   }
 });
+
+test("автопересчёт соли: ложки в граммы, ручная поправка и фактическое списание", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const recipe = await b.save("Блюдо с солью в ложках");
+    await b.query("select public.save_recipe($1,$2,$3,$4)", [
+      recipe.id,
+      b.family,
+      {
+        ...recipe.data,
+        servings: 4,
+        ingredients: [
+          {
+            id: crypto.randomUUID(),
+            name: "Соль",
+            amount: "1.125",
+            unit: "ч. л.",
+          },
+        ],
+      },
+      1,
+    ]);
+    const product = crypto.randomUUID(),
+      batch = crypto.randomUUID(),
+      menu = crypto.randomUUID();
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    await mutate("product_save", {
+      id: product,
+      name: "соль",
+      unit: "г",
+      minimum: 0,
+    });
+    await mutate("batch_save", {
+      id: batch,
+      product_id: product,
+      quantity: 190,
+      unit: "г",
+      purchased_on: day(),
+      reason: "Ручное добавление",
+    });
+    await mutate("menu_save", {
+      id: menu,
+      recipe_id: recipe.id,
+      month: day().slice(0, 7) + "-01",
+      date: day(),
+      meal: "Обед",
+      servings: 4,
+      planned_count: 1,
+      status: "Запланировано",
+    });
+    await page.goto("/menu");
+    const panel = page.locator("section.panel").filter({
+      has: page.getByRole("heading", {
+        name: "Ингредиенты плана",
+        exact: true,
+      }),
+    });
+    const salt = panel.locator("tbody tr");
+    await expect(salt.locator("td").nth(3)).toHaveText("0 ч. л.");
+    await expect(salt).toContainText("1 ч. л. ≈ 6 г");
+    await salt.locator("summary").click();
+    const coefficient = panel.getByRole("spinbutton", {
+      name: "Сколько г в 1 ч. л.: Соль",
+      exact: true,
+    });
+    await expect(coefficient).toHaveValue("6");
+    await expect(panel.locator(".automatic-conversion-note")).toBeVisible();
+    await expect(panel.locator(".automatic-conversion-note")).toContainText(
+      "мерной ложки без горки",
+    );
+    await coefficient.press("ControlOrMeta+A");
+    await coefficient.pressSequentially("5");
+    await expect(coefficient).toHaveValue("5");
+    await page.reload();
+    await salt.locator("summary").click();
+    await expect(coefficient).toHaveValue("5");
+    await panel
+      .getByRole("button", {
+        name: "Сбросить сопоставления ингредиентов",
+        exact: true,
+      })
+      .click();
+    await expect(coefficient).toHaveValue("6");
+    await page
+      .locator(".k-calendar")
+      .getByRole("button", {
+        name: "Действия: Блюдо с солью в ложках",
+        exact: true,
+      })
+      .click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Подтвердить готовку", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog", {
+      name: "Что сделано с приготовленным блюдом?",
+      exact: true,
+    });
+    await expect(dialog).toContainText(
+      "Будет списано: продукт «соль» — 6,75 г",
+    );
+    await dialog
+      .getByRole("checkbox", {
+        name: "Подтверждаю расход и распределение порций",
+        exact: true,
+      })
+      .check();
+    await dialog
+      .getByRole("button", { name: "Подтвердить приготовление", exact: true })
+      .click();
+    await expect(dialog).not.toBeVisible();
+    expect(
+      Number(
+        (
+          await b.query<{ quantity: string }>(
+            "select quantity from public.stock_batches where id=$1",
+            [batch],
+          )
+        ).rows[0].quantity,
+      ),
+    ).toBe(183.25);
+    expect(
+      (
+        await b.query("select id from public.cooking_events where menu_id=$1", [
+          menu,
+        ])
+      ).rows,
+    ).toHaveLength(1);
+  } finally {
+    await b.close();
+  }
+});

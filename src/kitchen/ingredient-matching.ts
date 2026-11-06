@@ -1,3 +1,4 @@
+import { automaticConversion } from "./unit-conversion";
 import {
   base,
   factor,
@@ -48,6 +49,12 @@ const aliases: Record<string, string> = {
   сухое: "сухой",
   сухие: "сухой",
   лавр: "лавровый лист",
+  соли: "соль",
+  сахара: "сахар",
+  муки: "мука",
+  меда: "мед",
+  молока: "молоко",
+  воды: "вода",
 };
 export function ingredientDisplayName(name: string): string {
   return name
@@ -146,7 +153,7 @@ export function inventorySources(
     );
 }
 export function automaticMatch(need: Need, source: InventorySource): boolean {
-  if (need.unit !== source.unit) return false;
+  if (sourceRatio(need, source) === undefined) return false;
   const wanted = ingredientName(need.name),
     actual = ingredientName(source.name);
   if (!wanted || !actual) return false;
@@ -222,16 +229,22 @@ export function matchIngredients(
             ? [chosen]
             : []
         : sources.filter((s) => automaticMatch(need, s));
-      const ratio =
-        chosen && !sourceMismatch && chosen.unit !== need.unit
-          ? Number(choice?.ratio)
-          : 1;
+      const ratioFor = (source: InventorySource) =>
+        sourceRatio(
+          need,
+          source,
+          source.id === choice?.sourceId && !sourceMismatch
+            ? choice.ratio
+            : undefined,
+        )!;
       const available = selected.reduce(
-        (sum, s) => sum + (remaining.get(s.id) ?? 0) * ratio,
+        (sum, source) =>
+          sum + (remaining.get(source.id) ?? 0) * ratioFor(source),
         0,
       );
       let pending = Math.min(need.quantity, available);
       for (const source of selected) {
+        const ratio = ratioFor(source);
         const amount = Math.min(remaining.get(source.id) ?? 0, pending / ratio);
         remaining.set(
           source.id,
@@ -343,19 +356,32 @@ export function setIngredientChoice(
   if (choice) next[key] = choice;
   return next;
 }
+export function automaticSourceConversion(
+  need: Pick<Need, "name" | "unit">,
+  source: Pick<InventorySource, "name" | "unit">,
+) {
+  return automaticConversion(
+    { ...need, name: ingredientName(need.name) },
+    { ...source, name: ingredientName(source.name) },
+  );
+}
+export function sourceRatio(
+  need: Pick<Need, "name" | "unit">,
+  source: Pick<InventorySource, "name" | "unit">,
+  ratio?: number,
+): number | undefined {
+  if (need.unit === source.unit) return 1;
+  if (ratio !== undefined)
+    return Number.isFinite(ratio) && ratio > 0 ? ratio : undefined;
+  return automaticSourceConversion(need, source)?.ratio;
+}
 export function conversionNeeded(
   need: Need,
   source: InventorySource,
   ratio?: number,
 ): boolean {
-  return (
-    source.unit !== need.unit &&
-    !(
-      Number.isFinite(ratio) &&
-      Number(ratio) > 0 &&
-      Number.isFinite(source.quantity * Number(ratio))
-    )
-  );
+  const resolved = sourceRatio(need, source, ratio);
+  return resolved === undefined || !Number.isFinite(source.quantity * resolved);
 }
 
 function canPropose(need: Need, source: InventorySource): boolean {

@@ -1,6 +1,8 @@
+import { automaticBaseUnit, isSpoon } from "./unit-conversion";
 import { base, factor, num, rows, str, type Row, type State } from "./model";
 import {
   ingredientChoice,
+  sourceRatio,
   ingredientName,
   ingredientRuleKey,
   inventorySources,
@@ -60,6 +62,7 @@ export function shoppingPlan(
     choices,
   );
   const groups = new Map<string, ShoppingTarget>();
+  const scales = new Map<MatchedNeed, number>();
   const errors: string[] = [],
     warnings: string[] = [];
   for (const n of matched) {
@@ -93,18 +96,48 @@ export function shoppingPlan(
       );
       continue;
     }
-    const key = `${product?.id ?? identity(n.name, n.unit)}|${n.unit}`;
+    let unit = n.unit,
+      quantity = n.missing;
+    if (isSpoon(n.unit)) {
+      const selected = n.matchedSources.find(
+        (source) => source.id === choice?.sourceId,
+      );
+      const manualUnit =
+        selected?.unit ??
+        choice?.sourceId.match(/^product:[0-9a-f-]{36}:(.+)$/)?.[1];
+      const target =
+        choice?.ratio !== undefined &&
+        manualUnit &&
+        ["г", "мл"].includes(manualUnit)
+          ? manualUnit
+          : automaticBaseUnit(ingredientName(n.name), n.unit);
+      if (target) {
+        const ratio =
+          choice?.ratio !== undefined && target === manualUnit
+            ? choice.ratio
+            : sourceRatio(n, {
+                name: product ? str(product, "name") : n.name,
+                unit: target,
+              });
+        if (ratio !== undefined && ratio > 0) {
+          unit = target;
+          quantity = n.missing / ratio;
+        }
+      }
+    }
+    scales.set(n, quantity / n.missing);
+    const key = `${product?.id ?? identity(n.name, unit)}|${unit}`;
     const group = groups.get(key) ?? {
       product,
       name: product ? str(product, "name") : n.name,
-      unit: n.unit,
+      unit,
       quantity: 0,
       aliases: new Set<string>(),
       needs: [],
     };
-    group.quantity += n.missing;
-    group.aliases.add(identity(n.name, n.unit));
-    group.aliases.add(identity(group.name, n.unit));
+    group.quantity += quantity;
+    group.aliases.add(identity(n.name, unit));
+    group.aliases.add(identity(group.name, unit));
     group.needs.push(n);
     groups.set(key, group);
   }
@@ -129,7 +162,18 @@ export function shoppingPlan(
       let ratio = unit === group.unit ? 1 : undefined;
       if (ratio === undefined) {
         const ratios = group.needs
-          .map((n) => ingredientChoice(choices, n))
+          .map((n) => {
+            const choice = ingredientChoice(choices, n);
+            return choice
+              ? {
+                  ...choice,
+                  ratio:
+                    choice.ratio === undefined
+                      ? undefined
+                      : choice.ratio * (scales.get(n) ?? 1),
+                }
+              : undefined;
+          })
           .filter(
             (c) =>
               c?.sourceId === `product:${p.id}:${unit}` &&
@@ -138,6 +182,10 @@ export function shoppingPlan(
           )
           .map((c) => c!.ratio!);
         if (new Set(ratios).size === 1) ratio = ratios[0];
+        ratio ??= sourceRatio(
+          { name: group.name, unit: group.unit },
+          { name: str(p, "name"), unit },
+        );
       }
       if (
         ratio === undefined ||

@@ -1,6 +1,9 @@
+import { automaticBaseUnit } from "./unit-conversion";
 import { base, factor, rows, str, type State, type Need } from "./model";
 import {
   ingredientChoice,
+  ingredientName,
+  sourceRatio,
   inventorySources,
   matchIngredients,
   type IngredientChoices,
@@ -60,19 +63,45 @@ export function cookingSources(
         errors.push(
           `Недостаточно для «${u.name}»: не хватает ${Number(match.missing.toFixed(4))} ${n.unit}. Выберите источник или уточните фактический расход.`,
         );
+      const choice = ingredientChoice(choices, n);
+      const chosen = match.matchedSources.find(
+        (source) => source.id === choice?.sourceId,
+      );
+      const manual =
+        chosen && choice?.ratio !== undefined && chosen.unit !== n.unit;
+      const fractionalManual =
+        manual &&
+        Math.abs(choice!.ratio! - Number(choice!.ratio!.toFixed(4))) > 1e-10;
+      const preferred = manual
+        ? fractionalManual
+          ? chosen.unit
+          : n.unit
+        : automaticBaseUnit(ingredientName(n.name), n.unit);
+      const outputUnit =
+        preferred &&
+        match.matchedSources.some((source) => source.unit !== n.unit)
+          ? preferred
+          : n.unit;
+      const baseRatio =
+        manual && outputUnit === chosen.unit
+          ? choice!.ratio!
+          : (sourceRatio(n, { name: n.name, unit: outputUnit }) ?? 1);
+      const outputAmount = Number((n.quantity / baseRatio).toFixed(4));
       let pending = n.quantity;
       for (const source of match.matchedSources) {
-        const choice = ingredientChoice(choices, n);
-        const ratio = source.unit === n.unit ? 1 : Number(choice?.ratio);
+        const ratio = sourceRatio(
+          n,
+          source,
+          source.id === choice?.sourceId ? choice.ratio : undefined,
+        )!;
+        const normalizedRatio = ratio / baseRatio;
         if (
-          !Number.isFinite(ratio) ||
-          ratio <= 0 ||
-          ratio > 1e9 ||
-          Math.abs(ratio - Number(ratio.toFixed(4))) > 1e-10
+          !Number.isFinite(normalizedRatio) ||
+          normalizedRatio <= 0 ||
+          normalizedRatio > 1e9 ||
+          Math.abs(normalizedRatio - Number(normalizedRatio.toFixed(4))) > 1e-10
         ) {
-          errors.push(
-            `«${u.name}»: коэффициент пересчёта должен иметь не более 4 знаков после запятой.`,
-          );
+          errors.push(`«${u.name}»: уточните коэффициент пересчёта источника.`);
           continue;
         }
         const quantity = Number(
@@ -85,7 +114,7 @@ export function cookingSources(
           id,
           quantity: quantity.toFixed(4),
           unit: source.unit,
-          ratio: ratio.toFixed(4),
+          ratio: normalizedRatio.toFixed(4),
           ...(source.kind === "preparation"
             ? {
                 version: rows(state, "preparations").find((p) => p.id === id)!
@@ -101,6 +130,13 @@ export function cookingSources(
       }
       if (!result.length)
         errors.push(`«${u.name}»: расход меньше точности учёта источника.`);
+      if (outputUnit !== n.unit)
+        return {
+          ...u,
+          unit: outputUnit,
+          amount: outputAmount.toFixed(4),
+          sources: result,
+        };
     }
     return { ...u, amount: u.amount.trim().replace(",", "."), sources: result };
   });
