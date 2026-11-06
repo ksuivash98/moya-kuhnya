@@ -5,6 +5,10 @@ import {
   inventorySources,
   automaticMatch,
   matchIngredients,
+  bulkIngredientSuggestions,
+  ingredientChoice,
+  ingredientRuleKey,
+  setIngredientChoice,
   type InventorySource,
 } from "../src/kitchen/ingredient-matching";
 import type { Json, Need, Row, State } from "../src/kitchen/model";
@@ -187,4 +191,121 @@ test("исчезнувший источник и явный отказ от уч
       [ingredientKey(n)]: { sourceId: "none" },
     })[0],
   ).toMatchObject({ available: 0, missing: 100, unavailable: false });
+});
+
+test("общий подбор заранее предлагает уникальные варианты и объединяет повторные названия", () => {
+  const first = need("Растительное масло", 6.4, "мл"),
+    second = need("Масло растительное", 10, "мл");
+  const sources = [source("Масло подсолнечное", 100, "мл", "product", "sun")];
+  const proposals = bulkIngredientSuggestions(
+    matchIngredients([first, second], sources, {}),
+    sources,
+    {},
+  );
+  expect(proposals).toHaveLength(1);
+  expect(proposals[0].choice).toEqual({ sourceId: "sun" });
+  expect(proposals[0].need.quantity).toBeCloseTo(16.4);
+  const choices = setIngredientChoice({}, first, proposals[0].choice);
+  expect(ingredientChoice(choices, second)).toEqual({ sourceId: "sun" });
+  const matched = matchIngredients([first, second], sources, choices);
+  expect(matched.map((n) => n.missing)).toEqual([0, 0]);
+  expect(matched[1].available).toBeCloseTo(93.6);
+  expect(bulkIngredientSuggestions(matched, sources, choices)).toHaveLength(0);
+});
+
+test("общий подбор не выбирает равные варианты и не подменяет отварное сырым", () => {
+  const oil = need("Растительное масло", 10, "мл");
+  const oils = [
+    source("Масло подсолнечное", 100, "мл", "product", "a"),
+    source("Масло оливковое", 100, "мл", "product", "b"),
+  ];
+  expect(
+    bulkIngredientSuggestions(matchIngredients([oil], oils, {}), oils, {})[0]
+      .choice,
+  ).toBeUndefined();
+  const meat = need("Отварное куриное мясо");
+  const raw = [source("Курица", 200)];
+  expect(
+    bulkIngredientSuggestions(matchIngredients([meat], raw, {}), raw, {})[0]
+      .choice,
+  ).toBeUndefined();
+  const pasta = need("Яичная лапша (сухая)");
+  const cooked = [source("Яичная лапша варёная", 200, "г", "preparation")];
+  expect(
+    bulkIngredientSuggestions(
+      matchIngredients([pasta], cooked, {}),
+      cooked,
+      {},
+    )[0].choice,
+  ).toBeUndefined();
+});
+
+test("ранее сохранённые соответствия переиспользуются, общий выбор сохраняет единицы и устраняет старые дубли", () => {
+  const a = need("Растительное масло", 10, "мл"),
+    b = need("Масло растительное", 20, "мл"),
+    c = need("Масло (растительное)", 20, "мл");
+  const legacy = { [ingredientKey(a)]: { sourceId: "old", ratio: 2 } };
+  expect(ingredientChoice(legacy, b)).toEqual({ sourceId: "old", ratio: 2 });
+  expect(
+    ingredientChoice(legacy, need("Масло растительное", 10, "г")),
+  ).toBeUndefined();
+  const conflict = { ...legacy, [ingredientKey(b)]: { sourceId: "another" } };
+  expect(ingredientChoice(conflict, c)).toBeUndefined();
+  const next = setIngredientChoice(conflict, c, { sourceId: "new" });
+  expect(Object.keys(next)).toEqual([ingredientRuleKey(c)]);
+  expect(ingredientChoice(next, a)).toEqual({ sourceId: "new" });
+  expect(ingredientChoice(next, b)).toEqual({ sourceId: "new" });
+  expect(setIngredientChoice(next, a)).toEqual({});
+});
+
+test("порции в общем подборе остаются с явным коэффициентом; подтверждённые решения не заменяются", () => {
+  const broth = need("Готовый куриный бульон", 1200, "мл"),
+    variant = need("Бульон куриный", 100, "мл");
+  const sources = [source("Куриный бульон", 2, "порц.", "preparation")];
+  const proposals = bulkIngredientSuggestions(
+    matchIngredients([broth], sources, {}),
+    sources,
+    {},
+  );
+  expect(proposals[0].choice).toEqual({ sourceId: "s" });
+  expect(
+    matchIngredients(
+      [broth],
+      sources,
+      setIngredientChoice({}, broth, proposals[0].choice),
+    )[0].conversionRequired,
+  ).toBe(true);
+  const choices = setIngredientChoice({}, broth, { sourceId: "s", ratio: 800 });
+  expect(ingredientChoice(choices, variant)).toEqual({
+    sourceId: "s",
+    ratio: 800,
+  });
+  expect(
+    bulkIngredientSuggestions(
+      matchIngredients([broth], sources, choices),
+      sources,
+      choices,
+    ),
+  ).toHaveLength(0);
+  const declined = setIngredientChoice({}, broth, { sourceId: "none" });
+  expect(
+    bulkIngredientSuggestions(
+      matchIngredients([broth], sources, declined),
+      sources,
+      declined,
+    ),
+  ).toHaveLength(0);
+});
+
+test("общий подбор находит единственный продукт с маркой и дополнительными словами в названии", () => {
+  const milk = need("Молоко", 100, "мл");
+  const sources = [
+    source("Молоко пастеризованное Домик 2.5%", 1000, "мл", "product", "milk"),
+  ];
+  const proposals = bulkIngredientSuggestions(
+    matchIngredients([milk], sources, {}),
+    sources,
+    {},
+  );
+  expect(proposals[0].choice).toEqual({ sourceId: "milk" });
 });

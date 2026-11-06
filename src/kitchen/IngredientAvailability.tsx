@@ -1,11 +1,15 @@
 import { useState } from "react";
+import IngredientSourceSelect from "./IngredientSourceSelect";
+import IngredientBulkMatching from "./IngredientBulkMatching";
 import { fmt, type Need, type State } from "./model";
 import {
   ingredientKey,
+  ingredientChoice,
+  ingredientRuleKey,
+  setIngredientChoice,
   inventorySources,
   matchIngredients,
   type IngredientChoices,
-  type InventorySource,
 } from "./ingredient-matching";
 
 function readChoices(key: string): IngredientChoices {
@@ -33,8 +37,6 @@ function readChoices(key: string): IngredientChoices {
     return {};
   }
 }
-const sourceLabel = (s: InventorySource) =>
-  `${s.name} — ${s.kind === "preparation" ? "заготовка" : "продукт"}, ${fmt(s.quantity)} ${s.unit}`;
 export default function IngredientAvailability({
   needs,
   state,
@@ -46,6 +48,7 @@ export default function IngredientAvailability({
   family: string;
   userId: string;
 }) {
+  const [bulkOpen, setBulkOpen] = useState(false);
   const storageKey = `kitchen-ingredient-matches:${userId}:${family}`;
   const [stored, setStored] = useState(() => ({
     key: storageKey,
@@ -72,15 +75,46 @@ export default function IngredientAvailability({
   return (
     <>
       <p className="muted">
-        Учитываются непросроченные продукты и заготовки. Похожие названия можно
-        подобрать ниже; порции, штуки и упаковки переводятся в г/мл только по
-        указанному вами коэффициенту. Один запас распределяется между строками
-        без двойного учёта.
+        Учитываются непросроченные продукты и заготовки. Подберите весь список
+        одной кнопкой; одинаковые и повторные названия используют сохранённое
+        соответствие. Один запас не засчитывается дважды.
       </p>
-      {Object.keys(choices).length > 0 && (
-        <button type="button" className="text-button" onClick={() => save({})}>
-          Сбросить сопоставления ингредиентов
+      <div className="k-toolbar">
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => setBulkOpen((open) => !open)}
+          aria-expanded={bulkOpen}
+        >
+          Подобрать все продукты
         </button>
+        <span className="muted">
+          Сопоставлено:{" "}
+          {requirements.filter((n) => n.matchedSources.length > 0).length} из{" "}
+          {requirements.length}
+        </span>
+        {Object.keys(choices).length > 0 && (
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => save({})}
+          >
+            Сбросить сопоставления ингредиентов
+          </button>
+        )}
+      </div>
+      {bulkOpen && (
+        <IngredientBulkMatching
+          key={needs.map(ingredientRuleKey).join(";")}
+          needs={requirements}
+          sources={sources}
+          choices={choices}
+          onClose={() => setBulkOpen(false)}
+          onApply={(next) => {
+            save(next);
+            setBulkOpen(false);
+          }}
+        />
       )}
       <div className="k-table-wrap">
         <table>
@@ -95,101 +129,21 @@ export default function IngredientAvailability({
           <tbody>
             {requirements.map((n) => {
               const key = ingredientKey(n),
-                choice = choices[key];
-              const selected = sources.find((s) => s.id === choice?.sourceId);
-              const similarIds = new Set(n.suggestions.map((s) => s.id));
-              const rest = sources.filter((s) => !similarIds.has(s.id));
+                choice = ingredientChoice(choices, n);
               return (
                 <tr key={key}>
                   <td>
                     <span>{n.name}</span>
                     <details className="ingredient-matches">
-                      <summary>
-                        {n.suggestions.length
-                          ? `Подобрать похожее (${n.suggestions.length})`
-                          : "Выбрать запас или заготовку"}
-                      </summary>
-                      <label>
-                        Источник для расчёта
-                        <select
-                          aria-label={`Источник для ${n.name} (${n.unit})`}
-                          value={choice?.sourceId ?? ""}
-                          onChange={(e) => {
-                            const next = { ...choices };
-                            if (e.target.value)
-                              next[key] = { sourceId: e.target.value };
-                            else delete next[key];
-                            save(next);
-                          }}
-                        >
-                          <option value="">Автоматически по названию</option>
-                          <option value="none">
-                            Не учитывать для этой строки
-                          </option>
-                          {n.unavailable && (
-                            <option value={choice.sourceId}>
-                              Выбранный запас недоступен
-                            </option>
-                          )}
-                          {n.suggestions.length > 0 && (
-                            <optgroup label="Похожие названия — подтвердите выбор">
-                              {n.suggestions.map((s) => (
-                                <option key={s.id} value={s.id}>
-                                  {sourceLabel(s)}
-                                </option>
-                              ))}
-                            </optgroup>
-                          )}
-                          {rest.length > 0 && (
-                            <optgroup label="Другие запасы и заготовки">
-                              {rest.map((s) => (
-                                <option key={s.id} value={s.id}>
-                                  {sourceLabel(s)}
-                                </option>
-                              ))}
-                            </optgroup>
-                          )}
-                        </select>
-                      </label>
-                      {selected && selected.unit !== n.unit && (
-                        <label>
-                          Сколько {n.unit} в 1 {selected.unit}
-                          <input
-                            type="number"
-                            min={0.0001}
-                            step="any"
-                            aria-label={`Сколько ${n.unit} в 1 ${selected.unit}: ${n.name}`}
-                            key={selected.id}
-                            defaultValue={choice.ratio ?? ""}
-                            onChange={(e) => {
-                              const ratio = e.target.valueAsNumber;
-                              save({
-                                ...choices,
-                                [key]: {
-                                  sourceId: selected.id,
-                                  ...(Number.isFinite(ratio) && ratio > 0
-                                    ? { ratio }
-                                    : {}),
-                                },
-                              });
-                            }}
-                          />
-                        </label>
-                      )}
-                      {n.conversionRequired && (
-                        <small>
-                          Укажите пересчёт, чтобы учесть этот запас.
-                        </small>
-                      )}
-                      {n.unavailable && (
-                        <small>
-                          Остаток закончился, продукт удалён или истёк срок
-                          годности. Выберите другой источник.
-                        </small>
-                      )}
-                      {!sources.length && (
-                        <small>Доступных запасов и заготовок пока нет.</small>
-                      )}
+                      <summary>Изменить источник</summary>
+                      <IngredientSourceSelect
+                        need={n}
+                        sources={sources}
+                        choice={choice}
+                        onChange={(c) =>
+                          save(setIngredientChoice(choices, n, c))
+                        }
+                      />
                     </details>
                   </td>
                   <td>

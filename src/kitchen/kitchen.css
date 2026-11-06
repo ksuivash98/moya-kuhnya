@@ -626,3 +626,29 @@ details .checkbox-label {
   text-decoration: line-through;
   color: var(--muted);
 }
+
+.ingredient-bulk-panel.panel {
+  padding: 18px;
+  margin: 12px 0;
+}
+.ingredient-bulk-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 1.5fr);
+  align-items: start;
+  gap: 12px 20px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.ingredient-bulk-control.ingredient-matches {
+  margin: 0;
+  max-width: 100%;
+  min-width: 0;
+}
+.ingredient-bulk-control label:first-child {
+  margin-top: 0;
+}
+@media (max-width: 600px) {
+  .ingredient-bulk-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

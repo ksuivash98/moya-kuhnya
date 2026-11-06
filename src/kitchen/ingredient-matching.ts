@@ -164,7 +164,8 @@ export function similarity(name: string, other: string): number {
   const wordsA = new Set(a.split(" ")),
     wordsB = new Set(b.split(" "));
   const common = [...wordsA].filter((w) => wordsB.has(w)).length;
-  const wordScore = common / Math.max(wordsA.size, wordsB.size);
+  const wordScore =
+    common === wordsA.size ? 0.85 : common / Math.max(wordsA.size, wordsB.size);
   const grams = (s: string) =>
     new Set(
       Array.from({ length: Math.max(0, s.length - 2) }, (_, i) =>
@@ -194,18 +195,12 @@ export function matchIngredients(
   return needs
     .filter((n) => n.quantity > 0)
     .map((need) => {
-      const choice = choices[ingredientKey(need)];
+      const choice = ingredientChoice(choices, need);
       const chosen = choice
         ? sources.find((s) => s.id === choice.sourceId)
         : undefined;
       const conversionRequired =
-        !!chosen &&
-        chosen.unit !== need.unit &&
-        !(
-          Number.isFinite(choice?.ratio) &&
-          Number(choice?.ratio) > 0 &&
-          Number.isFinite(chosen.quantity * Number(choice?.ratio))
-        );
+        !!chosen && conversionNeeded(need, chosen, choice?.ratio);
       const selected = choice
         ? chosen && !conversionRequired
           ? [chosen]
@@ -247,4 +242,161 @@ export function matchIngredients(
         conversionRequired,
       };
     });
+}
+
+// One confirmed correspondence is reused for spelling variants and word order.
+export function ingredientRuleKey(need: Pick<Need, "name" | "unit">): string {
+  let name = ingredientName(need.name);
+  if (need.unit === "мл" && name.split(" ").includes("бульон"))
+    name = name
+      .split(" ")
+      .filter((w) => w !== "готовый")
+      .join(" ");
+  return `rule:${name}|${need.unit}`;
+}
+export function ingredientChoice(
+  choices: IngredientChoices,
+  need: Need,
+): IngredientChoice | undefined {
+  const direct =
+    choices[ingredientRuleKey(need)] ?? choices[ingredientKey(need)];
+  if (direct) return direct;
+  const key = ingredientRuleKey(need);
+  let found: IngredientChoice | undefined;
+  for (const [old, choice] of Object.entries(choices)) {
+    const separator = old.lastIndexOf("|");
+    if (
+      separator < 0 ||
+      ingredientRuleKey({
+        name: old.slice(0, separator).replace(/^rule:/, ""),
+        unit: old.slice(separator + 1),
+      }) !== key
+    )
+      continue;
+    if (
+      found &&
+      (found.sourceId !== choice.sourceId || found.ratio !== choice.ratio)
+    )
+      return undefined;
+    found = choice;
+  }
+  return found;
+}
+export function setIngredientChoice(
+  choices: IngredientChoices,
+  need: Need,
+  choice?: IngredientChoice,
+): IngredientChoices {
+  const key = ingredientRuleKey(need),
+    next = { ...choices };
+  for (const old of Object.keys(next)) {
+    const separator = old.lastIndexOf("|");
+    if (
+      separator >= 0 &&
+      ingredientRuleKey({
+        name: old.slice(0, separator).replace(/^rule:/, ""),
+        unit: old.slice(separator + 1),
+      }) === key
+    )
+      delete next[old];
+  }
+  if (choice) next[key] = choice;
+  return next;
+}
+export function conversionNeeded(
+  need: Need,
+  source: InventorySource,
+  ratio?: number,
+): boolean {
+  return (
+    source.unit !== need.unit &&
+    !(
+      Number.isFinite(ratio) &&
+      Number(ratio) > 0 &&
+      Number.isFinite(source.quantity * Number(ratio))
+    )
+  );
+}
+
+function canPropose(need: Need, source: InventorySource): boolean {
+  const wanted = ingredientName(need.name).split(" "),
+    actual = ingredientName(source.name).split(" ");
+  const states = (words: string[]) =>
+    words.filter(
+      (w) =>
+        w === "сухой" ||
+        /^(варен|жарен|сырой|сырая|сырое|копчен|консервирован)/.test(w),
+    );
+  const wantedStates = states(wanted),
+    actualStates = states(actual);
+  if (
+    wantedStates.some(
+      (w) =>
+        !actualStates.includes(w) &&
+        !(w === "сухой" && source.kind === "product" && !actualStates.length),
+    )
+  )
+    return false;
+  if (actualStates.some((w) => !wantedStates.includes(w))) return false;
+  const proteins = ["курица", "индейка", "говядина", "свинина", "рыба"];
+  if (wanted.some((w) => proteins.includes(w) && !actual.includes(w)))
+    return false;
+  if (
+    source.kind === "preparation" &&
+    !wantedStates.length &&
+    !wanted.includes("готовый") &&
+    !wanted.includes("бульон") &&
+    ingredientName(need.name) !== ingredientName(source.name)
+  )
+    return false;
+  return true;
+}
+export type BulkIngredientSuggestion = {
+  need: MatchedNeed;
+  choice?: IngredientChoice;
+};
+export function bulkIngredientSuggestions(
+  needs: MatchedNeed[],
+  sources: InventorySource[],
+  choices: IngredientChoices,
+): BulkIngredientSuggestion[] {
+  const seen = new Set<string>();
+  const result: BulkIngredientSuggestion[] = [];
+  for (const need of needs) {
+    const key = ingredientRuleKey(need),
+      current = ingredientChoice(choices, need);
+    if (seen.has(key)) continue;
+    if (current && !need.unavailable && !need.conversionRequired) continue;
+    if (!current && need.matchedSources.length) continue;
+    if (current && !need.unavailable) {
+      seen.add(key);
+      result.push({ need, choice: current });
+      continue;
+    }
+    const ranked = sources
+      .filter((s) => canPropose(need, s))
+      .map((source) => ({ source, score: similarity(need.name, source.name) }))
+      .filter((s) => s.score >= 0.45)
+      .sort(
+        (a, b) =>
+          b.score - a.score || a.source.name.localeCompare(b.source.name, "ru"),
+      );
+    const best = ranked[0],
+      second = ranked[1];
+    const confident = best && (!second || best.score - second.score >= 0.12);
+    seen.add(key);
+    result.push({
+      need,
+      choice: confident ? { sourceId: best.source.id } : undefined,
+    });
+  }
+  return result.map((item) => ({
+    ...item,
+    need: {
+      ...item.need,
+      quantity: needs
+        .filter((n) => ingredientRuleKey(n) === ingredientRuleKey(item.need))
+        .reduce((sum, n) => sum + n.quantity, 0),
+    },
+  }));
 }

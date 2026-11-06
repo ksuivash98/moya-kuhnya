@@ -2340,14 +2340,12 @@ test("ингредиенты меню: похожие продукты, заго
       status: "Запланировано",
     });
     await page.goto("/menu");
-    const panel = page
-      .locator("section.panel")
-      .filter({
-        has: page.getByRole("heading", {
-          name: "Ингредиенты плана",
-          exact: true,
-        }),
-      });
+    const panel = page.locator("section.panel").filter({
+      has: page.getByRole("heading", {
+        name: "Ингредиенты плана",
+        exact: true,
+      }),
+    });
     const row = (name: string) =>
       panel
         .locator("tbody tr")
@@ -2427,6 +2425,155 @@ test("ингредиенты меню: похожие продукты, заго
       .click();
     await expect(brothRow.locator("td").nth(2)).toHaveText(/^0\s*мл/);
     await expect(row("Картофель").locator("td").nth(2)).toHaveText(/^500\s*г/);
+  } finally {
+    await b.close();
+  }
+});
+
+test("общий подбор меню: готовые предложения, один пересчёт порции и применение ко всем блюдам", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    const oil = crypto.randomUUID(),
+      broth = crypto.randomUUID();
+    await mutate("product_save", {
+      id: oil,
+      name: "Масло подсолнечное",
+      unit: "мл",
+      category: "Другое",
+      minimum: 0,
+    });
+    await mutate("batch_save", {
+      id: crypto.randomUUID(),
+      product_id: oil,
+      quantity: 50,
+      unit: "мл",
+      purchased_on: day(),
+      reason: "Ручное добавление",
+    });
+    await mutate("prep_save", {
+      id: broth,
+      title: "Куриный бульон",
+      quantity: 2,
+      unit: "порц.",
+      category: "Готовые блюда",
+      prepared_on: day(),
+      expires_on: "2099-01-01",
+    });
+    async function plan(title: string, items: string[][]) {
+      const r = await b.save(title);
+      await b.query("select public.save_recipe($1,$2,$3,$4)", [
+        r.id,
+        b.family,
+        {
+          ...r.data,
+          servings: 4,
+          ingredients: items.map(([name, amount, unit]) => ({
+            id: crypto.randomUUID(),
+            name,
+            amount,
+            unit,
+          })),
+        },
+        1,
+      ]);
+      await mutate("menu_save", {
+        id: crypto.randomUUID(),
+        recipe_id: r.id,
+        month: day().slice(0, 7) + "-01",
+        date: day(),
+        meal: "Обед",
+        servings: 4,
+        planned_count: 1,
+        status: "Запланировано",
+      });
+    }
+    await plan("Первый суп", [
+      ["Растительное масло", "10", "мл"],
+      ["Готовый куриный бульон", "1200", "мл"],
+    ]);
+    await plan("Второй суп", [
+      ["Масло растительное", "15", "мл"],
+      ["Бульон куриный", "200", "мл"],
+    ]);
+    await page.goto("/menu");
+    const panel = page.locator("section.panel").filter({
+      has: page.getByRole("heading", {
+        name: "Ингредиенты плана",
+        exact: true,
+      }),
+    });
+    await expect(panel.locator("tbody tr")).toHaveCount(4);
+    await panel
+      .getByRole("button", { name: "Подобрать все продукты", exact: true })
+      .click();
+    const bulk = page.getByRole("region", {
+      name: "Общий подбор продуктов",
+      exact: true,
+    });
+    await expect(bulk.locator("article")).toHaveCount(2);
+    const selected = await bulk.getByRole("combobox").all();
+    expect(selected).toHaveLength(2);
+    for (const picker of selected) await expect(picker).not.toHaveValue("");
+    const apply = bulk.getByRole("button", { name: /^Применить подбор/ });
+    await expect(apply).toBeDisabled();
+    await bulk
+      .getByRole("spinbutton", { name: /^Сколько мл в 1 порц\./ })
+      .fill("800");
+    const ratioInput = bulk.getByRole("spinbutton", {
+      name: /^Сколько мл в 1 порц\./,
+    });
+    await ratioInput.press("ControlOrMeta+A");
+    await ratioInput.pressSequentially("0.5");
+    await expect(ratioInput).toHaveValue("0.5");
+    await ratioInput.fill("800");
+    await expect(apply).toBeEnabled();
+    // Предложения до подтверждения не меняют итоговую таблицу.
+    for (const row of await panel.locator("tbody tr").all())
+      await expect(row.locator("td").nth(2)).toHaveText(/^0\s*мл/);
+    await apply.click();
+    await expect(bulk).toHaveCount(0);
+    for (const row of await panel.locator("tbody tr").all())
+      await expect(row.locator("td").nth(3)).toHaveText(/^0\s*мл$/);
+    await page.reload();
+    await expect(panel.locator("tbody tr")).toHaveCount(4);
+    for (const row of await panel.locator("tbody tr").all())
+      await expect(row.locator("td").nth(3)).toHaveText(/^0\s*мл$/);
+    await plan("Ещё одно блюдо", [["Масло (растительное)", "5", "мл"]]);
+    await page.reload();
+    const repeated = panel
+      .locator("tbody tr")
+      .filter({ has: page.getByText("Масло (растительное)", { exact: true }) });
+    await expect(repeated.locator("td").nth(3)).toHaveText(/^0\s*мл$/);
+    await expect(repeated).toContainText("Продукт: Масло подсолнечное");
+    await panel
+      .getByRole("button", { name: "Подобрать все продукты", exact: true })
+      .click();
+    await expect(bulk).toContainText("Все доступные соответствия уже учтены");
+    expect(
+      Number(
+        (
+          await b.query<{ quantity: number }>(
+            "select quantity from public.preparations where id=$1",
+            [broth],
+          )
+        ).rows[0].quantity,
+      ),
+    ).toBe(2);
+    expect(
+      (await b.query("select id from public.preparation_uses")).rows,
+    ).toHaveLength(0);
+    expect(
+      (await b.query("select id from public.shopping_items")).rows,
+    ).toHaveLength(0);
   } finally {
     await b.close();
   }
