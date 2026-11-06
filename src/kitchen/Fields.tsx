@@ -23,6 +23,7 @@ export default function Fields({
   extra,
   externalBusy = false,
   description,
+  className,
 }: {
   title: string;
   fields: Field[];
@@ -33,6 +34,7 @@ export default function Fields({
   extra?: ReactNode;
   externalBusy?: boolean;
   description?: string;
+  className?: string;
 }) {
   const hintId = useId();
   const [busy, setBusy] = useState(false),
@@ -56,16 +58,22 @@ export default function Fields({
     }
   }
   return (
-    <Modal title={title} onClose={() => !busy && !externalBusy && onClose()}>
+    <Modal
+      title={title}
+      className={className}
+      onClose={() => !busy && !externalBusy && onClose()}
+    >
       {description && <p className="muted">{description}</p>}
       <form onSubmit={submit} className="form-stack">
         <fieldset disabled={busy} className="k-fields">
           {extra}
           {fields.map((f) =>
             f.render ? (
-              <div key={f.key}>{f.render(initialValue.current[f.key])}</div>
+              <div key={f.key} data-field={f.key}>
+                {f.render(initialValue.current[f.key])}
+              </div>
             ) : (
-              <label key={f.key}>
+              <label key={f.key} data-field={f.key}>
                 {f.label}
                 {f.type === "textarea" ? (
                   <textarea

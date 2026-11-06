@@ -874,6 +874,9 @@ export default function Planning({
       )}
       {dialog && (
         <Fields
+          className={
+            dialog.action === "menu_repeat" ? undefined : "planning-form-dialog"
+          }
           offlineAllowed={
             dialog.action === "menu_save" || dialog.action === "task_save"
           }

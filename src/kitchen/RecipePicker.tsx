@@ -15,13 +15,13 @@ export default function RecipePicker({
     normalize(o.label).includes(normalize(query)),
   );
   return (
-    <div className="form-stack">
+    <div className="recipe-picker">
       <label>
         Поиск рецепта
         <input
           type="search"
           aria-label="Поиск рецепта"
-          placeholder="Начните вводить название рецепта"
+          placeholder="Название рецепта"
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);

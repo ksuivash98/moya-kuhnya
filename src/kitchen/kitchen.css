@@ -56,6 +56,60 @@
   padding: 12px;
   color: var(--text);
 }
+.recipe-picker {
+  display: grid;
+  gap: 12px;
+}
+.planning-form-dialog {
+  padding: 20px;
+  max-height: 86dvh;
+  border-radius: 20px;
+}
+.planning-form-dialog .modal-head {
+  margin-bottom: 8px;
+}
+.planning-form-dialog .modal-head h2 {
+  font-size: 21px;
+}
+.planning-form-dialog .form-stack {
+  margin-top: 12px;
+  gap: 12px;
+}
+.planning-form-dialog .k-fields {
+  gap: 12px;
+}
+.planning-form-dialog .k-fields > * {
+  min-width: 0;
+}
+.planning-form-dialog label {
+  gap: 5px;
+}
+.planning-form-dialog :is(input, select) {
+  min-height: 42px;
+  padding: 8px 10px;
+}
+.planning-form-dialog textarea {
+  min-height: 58px;
+  padding: 8px 10px;
+}
+.planning-form-dialog .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 0;
+}
+@media (min-width: 600px) {
+  .planning-form-dialog .k-fields,
+  .planning-form-dialog .recipe-picker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .planning-form-dialog [data-field="recipe_id"],
+  .planning-form-dialog [data-field="notes"],
+  .planning-form-dialog .recipe-picker > p {
+    grid-column: 1 / -1;
+  }
+}
 .k-calendar {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
