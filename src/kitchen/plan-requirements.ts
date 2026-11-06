@@ -1,3 +1,4 @@
+import { combineIngredientNeeds } from "./ingredient-groups";
 import { needs, rows, str, type State } from "./model";
 export type PlanScope = {
   month: string;
@@ -20,5 +21,5 @@ export function planRequirements(state: State, scope: PlanScope) {
   const tasks = rows(state, "cooking_tasks").filter((r) =>
     dated ? inRange(r) : str(r, "date").startsWith(scope.month),
   );
-  return needs(state, [...menu, ...tasks]);
+  return combineIngredientNeeds(needs(state, [...menu, ...tasks]));
 }

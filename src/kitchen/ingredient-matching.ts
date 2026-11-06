@@ -49,8 +49,17 @@ const aliases: Record<string, string> = {
   сухие: "сухой",
   лавр: "лавровый лист",
 };
+export function ingredientDisplayName(name: string): string {
+  return name
+    .replace(
+      /\s+(?:\(\s*)?для\s+(?:зажарки|обжарки|жарки|подачи|смазывания(?:\s+(?:формы|сковороды))?|тушения)\s*\)?\s*$/iu,
+      "",
+    )
+    .replace(/[,\s]+$/u, "")
+    .trim();
+}
 export function ingredientName(name: string): string {
-  let words = name
+  let words = ingredientDisplayName(name)
     .toLocaleLowerCase("ru")
     .replace(/ё/g, "е")
     .replace(/[^а-яa-z0-9]+/g, " ")
@@ -265,6 +274,42 @@ export function ingredientRuleKey(need: Pick<Need, "name" | "unit">): string {
       .join(" ");
   return `rule:${name}|${need.unit}`;
 }
+// Older rule keys contain alphabetically sorted purpose words.
+function storedIngredientRule(
+  key: string,
+  expected: string,
+): string | undefined {
+  const separator = key.lastIndexOf("|");
+  if (separator < 0) return undefined;
+  let name = key.slice(0, separator).replace(/^rule:/, "");
+  const original = ingredientRuleKey({ name, unit: key.slice(separator + 1) });
+  if (original === expected) return original;
+  if (key.startsWith("rule:")) {
+    const words = name.split(" ");
+    const purpose = words.find((word) =>
+      [
+        "зажарки",
+        "обжарки",
+        "жарки",
+        "подачи",
+        "смазывания",
+        "тушения",
+      ].includes(word),
+    );
+    if (words.includes("для") && purpose)
+      name = words
+        .filter(
+          (word) =>
+            word !== "для" &&
+            word !== purpose &&
+            !(
+              purpose === "смазывания" && ["формы", "сковороды"].includes(word)
+            ),
+        )
+        .join(" ");
+  }
+  return ingredientRuleKey({ name, unit: key.slice(separator + 1) });
+}
 export function ingredientChoice(
   choices: IngredientChoices,
   need: Need,
@@ -275,15 +320,7 @@ export function ingredientChoice(
   const key = ingredientRuleKey(need);
   let found: IngredientChoice | undefined;
   for (const [old, choice] of Object.entries(choices)) {
-    const separator = old.lastIndexOf("|");
-    if (
-      separator < 0 ||
-      ingredientRuleKey({
-        name: old.slice(0, separator).replace(/^rule:/, ""),
-        unit: old.slice(separator + 1),
-      }) !== key
-    )
-      continue;
+    if (storedIngredientRule(old, key) !== key) continue;
     if (
       found &&
       (found.sourceId !== choice.sourceId || found.ratio !== choice.ratio)
@@ -301,15 +338,7 @@ export function setIngredientChoice(
   const key = ingredientRuleKey(need),
     next = { ...choices };
   for (const old of Object.keys(next)) {
-    const separator = old.lastIndexOf("|");
-    if (
-      separator >= 0 &&
-      ingredientRuleKey({
-        name: old.slice(0, separator).replace(/^rule:/, ""),
-        unit: old.slice(separator + 1),
-      }) === key
-    )
-      delete next[old];
+    if (storedIngredientRule(old, key) === key) delete next[old];
   }
   if (choice) next[key] = choice;
   return next;

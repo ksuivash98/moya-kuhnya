@@ -2609,7 +2609,7 @@ test("общий подбор меню: готовые предложения, �
         exact: true,
       }),
     });
-    await expect(panel.locator("tbody tr")).toHaveCount(4);
+    await expect(panel.locator("tbody tr")).toHaveCount(2);
     await panel
       .getByRole("button", { name: "Подобрать все продукты", exact: true })
       .click();
@@ -2642,14 +2642,15 @@ test("общий подбор меню: готовые предложения, �
     for (const row of await panel.locator("tbody tr").all())
       await expect(row.locator("td").nth(3)).toHaveText(/^0\s*мл$/);
     await page.reload();
-    await expect(panel.locator("tbody tr")).toHaveCount(4);
+    await expect(panel.locator("tbody tr")).toHaveCount(2);
     for (const row of await panel.locator("tbody tr").all())
       await expect(row.locator("td").nth(3)).toHaveText(/^0\s*мл$/);
     await plan("Ещё одно блюдо", [["Масло (растительное)", "5", "мл"]]);
     await page.reload();
     const repeated = panel
       .locator("tbody tr")
-      .filter({ has: page.getByText("Масло (растительное)", { exact: true }) });
+      .filter({ hasText: "Продукт: Масло подсолнечное" });
+    await expect(repeated.locator("td").nth(1)).toHaveText(/^30\s*мл$/);
     await expect(repeated.locator("td").nth(3)).toHaveText(/^0\s*мл$/);
     await expect(repeated).toContainText("Продукт: Масло подсолнечное");
     await panel
@@ -2924,6 +2925,102 @@ test("подтвердить готовку: бульон из заготовк�
         )
       ).rows,
     ).toHaveLength(0);
+  } finally {
+    await b.close();
+  }
+});
+
+test("ингредиенты плана: одинаковое масло суммируется, кукуруза одной группой, сырое и отварное отдельно", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const recipe = await b.save("Блюдо для объединения ингредиентов");
+    const ingredients = [
+      ["консервированная кукуруза", "150", "г"],
+      ["Консервированная кукуруза", "1.5", "упаковка"],
+      ["Отварное куриное мясо", "1385", "г"],
+      ["куриное филе", "225", "г"],
+      ["Растительное масло", "80.8", "мл"],
+      ["Растительное масло для зажарки", "67.5", "мл"],
+    ];
+    await b.query("select public.save_recipe($1,$2,$3,$4)", [
+      recipe.id,
+      b.family,
+      {
+        ...recipe.data,
+        servings: 4,
+        ingredients: ingredients.map(([name, amount, unit]) => ({
+          id: crypto.randomUUID(),
+          name,
+          amount,
+          unit,
+        })),
+      },
+      1,
+    ]);
+    await b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+      b.family,
+      crypto.randomUUID(),
+      "menu_save",
+      {
+        id: crypto.randomUUID(),
+        recipe_id: recipe.id,
+        month: day().slice(0, 7) + "-01",
+        date: day(),
+        meal: "Обед",
+        servings: 4,
+        planned_count: 1,
+        status: "Запланировано",
+      },
+    ]);
+    await page.goto("/menu");
+    const panel = page.locator("section.panel").filter({
+      has: page.getByRole("heading", {
+        name: "Ингредиенты плана",
+        exact: true,
+      }),
+    });
+    await expect(panel.locator("tbody")).toHaveCount(4);
+    await expect(panel.locator(".ingredient-product-name")).toHaveCount(4);
+    const corn = panel.getByRole("rowgroup", {
+      name: "Ингредиент: консервированная кукуруза",
+      exact: true,
+    });
+    await expect(corn.locator("tr")).toHaveCount(2);
+    await expect(corn).toContainText("150 г");
+    await expect(corn).toContainText("1,5 упаковка");
+    const oil = panel.getByRole("rowgroup", {
+      name: "Ингредиент: Растительное масло",
+      exact: true,
+    });
+    await expect(oil.locator("tr")).toHaveCount(1);
+    await expect(oil.locator("td").nth(1)).toHaveText("148,3 мл");
+    await expect(
+      panel.getByText("Отварное куриное мясо", { exact: true }),
+    ).toHaveCount(1);
+    await expect(panel.getByText("куриное филе", { exact: true })).toHaveCount(
+      1,
+    );
+    await panel
+      .getByRole("button", { name: "Подобрать все продукты", exact: true })
+      .click();
+    const bulk = page.getByRole("region", {
+      name: "Общий подбор продуктов",
+      exact: true,
+    });
+    await expect(bulk.locator("article")).toHaveCount(4);
+    const cornCard = bulk.locator("article").filter({
+      has: page.getByText("консервированная кукуруза", { exact: true }),
+    });
+    await expect(cornCard).toHaveCount(1);
+    await expect(cornCard).toContainText("Нужно: 150 г + 1,5 упаковка");
+    await expect(cornCard.getByRole("combobox")).toHaveCount(2);
+    await expect(
+      bulk
+        .locator("article")
+        .filter({ has: page.getByText("Растительное масло", { exact: true }) }),
+    ).toContainText("Нужно: 148,3 мл");
   } finally {
     await b.close();
   }

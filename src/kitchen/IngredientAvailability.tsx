@@ -1,5 +1,9 @@
 import { useState } from "react";
 import {
+  combineIngredientNeeds,
+  groupIngredientNeeds,
+} from "./ingredient-groups";
+import {
   ingredientChoicesKey,
   readIngredientChoices,
 } from "./ingredient-preferences";
@@ -38,7 +42,11 @@ export default function IngredientAvailability({
       ? stored.choices
       : readIngredientChoices(userId, family);
   const sources = inventorySources(state, family);
-  const requirements = matchIngredients(needs, sources, choices);
+  const requirements = matchIngredients(
+    combineIngredientNeeds(needs),
+    sources,
+    choices,
+  );
   const save = (next: IngredientChoices) => {
     setStored({ key: storageKey, choices: next });
     try {
@@ -107,51 +115,71 @@ export default function IngredientAvailability({
               <th>Докупить</th>
             </tr>
           </thead>
-          <tbody>
-            {requirements.map((n) => {
-              const key = ingredientKey(n),
-                choice = ingredientChoice(choices, n);
-              return (
-                <tr key={key}>
-                  <td>
-                    <span>{n.name}</span>
-                    <details className="ingredient-matches">
-                      <summary>Изменить источник</summary>
-                      <IngredientSourceSelect
-                        need={n}
-                        sources={sources}
-                        choice={choice}
-                        onChange={(c) =>
-                          save(setIngredientChoice(choices, n, c))
-                        }
-                      />
-                    </details>
-                  </td>
-                  <td>
-                    {fmt(n.quantity)} {n.unit}
-                  </td>
-                  <td>
-                    {fmt(n.available)} {n.unit}
-                    {n.matchedSources.length > 0 && (
-                      <small className="ingredient-sources">
-                        {[
-                          ...new Set(
-                            n.matchedSources.map(
-                              (s) =>
-                                `${s.kind === "preparation" ? "Заготовка" : "Продукт"}: ${s.name}`,
-                            ),
-                          ),
-                        ].join("; ")}
-                      </small>
+          {groupIngredientNeeds(requirements).map((group) => (
+            <tbody key={group.key} aria-label={`Ингредиент: ${group.name}`}>
+              {group.needs.map((n, index) => {
+                const key = ingredientKey(n);
+                return (
+                  <tr key={key}>
+                    {index === 0 && (
+                      <td rowSpan={group.needs.length}>
+                        <span className="ingredient-product-name">
+                          {group.name}
+                        </span>
+                        <details className="ingredient-matches">
+                          <summary>Изменить источник</summary>
+                          {group.needs.map((need) => (
+                            <div key={ingredientKey(need)}>
+                              {group.needs.length > 1 && (
+                                <p className="muted">
+                                  Для количества в {need.unit}
+                                </p>
+                              )}
+                              <IngredientSourceSelect
+                                need={need}
+                                sources={sources}
+                                choice={ingredientChoice(choices, need)}
+                                onChange={(c) =>
+                                  save(setIngredientChoice(choices, need, c))
+                                }
+                              />
+                            </div>
+                          ))}
+                        </details>
+                        {group.needs.length > 1 && (
+                          <small className="ingredient-sources">
+                            Для сложения разных единиц нужен коэффициент
+                            пересчёта, например вес упаковки.
+                          </small>
+                        )}
+                      </td>
                     )}
-                  </td>
-                  <td>
-                    {fmt(n.missing)} {n.unit}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
+                    <td>
+                      {fmt(n.quantity)} {n.unit}
+                    </td>
+                    <td>
+                      {fmt(n.available)} {n.unit}
+                      {n.matchedSources.length > 0 && (
+                        <small className="ingredient-sources">
+                          {[
+                            ...new Set(
+                              n.matchedSources.map(
+                                (s) =>
+                                  `${s.kind === "preparation" ? "Заготовка" : "Продукт"}: ${s.name}`,
+                              ),
+                            ),
+                          ].join("; ")}
+                        </small>
+                      )}
+                    </td>
+                    <td>
+                      {fmt(n.missing)} {n.unit}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          ))}
         </table>
       </div>
       <p className="muted">

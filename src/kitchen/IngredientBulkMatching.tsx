@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { groupIngredientNeeds } from "./ingredient-groups";
 import { fmt } from "./model";
 import IngredientSourceSelect from "./IngredientSourceSelect";
 import {
@@ -54,24 +55,40 @@ export default function IngredientBulkMatching({
         порции нужно указать один раз.
       </p>
       {!items.length && <p>Все доступные соответствия уже учтены.</p>}
-      {items.map(({ need }) => (
-        <article className="ingredient-bulk-row" key={ingredientRuleKey(need)}>
+      {groupIngredientNeeds(items.map((item) => item.need)).map((group) => (
+        <article className="ingredient-bulk-row" key={group.key}>
           <div>
-            <strong>{need.name}</strong>
+            <strong>{group.name}</strong>
             <p className="muted">
-              Нужно: {fmt(need.quantity)} {need.unit}
+              Нужно:{" "}
+              {group.needs
+                .map((need) => `${fmt(need.quantity)} ${need.unit}`)
+                .join(" + ")}
             </p>
+            {group.needs.length > 1 && (
+              <p className="muted">
+                Для сложения разных единиц нужен коэффициент пересчёта, например
+                вес упаковки.
+              </p>
+            )}
           </div>
           <div className="ingredient-matches ingredient-bulk-control">
-            <IngredientSourceSelect
-              emptyLabel="Оставить без изменений"
-              need={need}
-              sources={sources}
-              choice={draft[ingredientRuleKey(need)]}
-              onChange={(c) =>
-                setDraft((d) => ({ ...d, [ingredientRuleKey(need)]: c }))
-              }
-            />
+            {group.needs.map((need) => (
+              <div key={ingredientRuleKey(need)}>
+                {group.needs.length > 1 && (
+                  <p className="muted">Для количества в {need.unit}</p>
+                )}
+                <IngredientSourceSelect
+                  emptyLabel="Оставить без изменений"
+                  need={need}
+                  sources={sources}
+                  choice={draft[ingredientRuleKey(need)]}
+                  onChange={(c) =>
+                    setDraft((d) => ({ ...d, [ingredientRuleKey(need)]: c }))
+                  }
+                />
+              </div>
+            ))}
           </div>
         </article>
       ))}
