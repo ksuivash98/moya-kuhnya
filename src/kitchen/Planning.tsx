@@ -1,3 +1,4 @@
+import MenuSchedule, { type MenuScheduleValue } from "./MenuSchedule";
 import {
   menuOnDate,
   menuOverlaps,
@@ -210,29 +211,46 @@ export default function Planning({
   };
   const common: Field[] = [
     recipeField,
-    ...(periodEditing
+    ...(dialog?.recipeId && dialog.action === "menu_save"
       ? [
           {
-            key: "period_start",
-            label: "Начало периода",
-            type: "date",
-            required: true,
-          },
-          {
-            key: "period_end",
-            label: "Конец периода",
-            type: "date",
-            required: true,
+            key: "menu_schedule",
+            label: "Добавить в меню",
+            render: (initial: unknown) => (
+              <MenuSchedule
+                initial={initial as MenuScheduleValue}
+                onPeriodChange={(period) =>
+                  setDialog((current) =>
+                    current ? { ...current, period } : current,
+                  )
+                }
+              />
+            ),
           },
         ]
-      : [
-          {
-            key: "date",
-            label: "Дата",
-            type: "date",
-            required: kind === "cooking",
-          },
-        ]),
+      : periodEditing
+        ? [
+            {
+              key: "period_start",
+              label: "Начало периода",
+              type: "date",
+              required: true,
+            },
+            {
+              key: "period_end",
+              label: "Конец периода",
+              type: "date",
+              required: true,
+            },
+          ]
+        : [
+            {
+              key: "date",
+              label: "Дата",
+              type: "date",
+              required: kind === "cooking",
+            },
+          ]),
     {
       key: "servings",
       label: periodEditing ? "Порций на весь период" : "Количество порций",
@@ -301,7 +319,7 @@ export default function Planning({
           ]
         : [
             ...common,
-            ...(periodEditing
+            ...(periodEditing || !!dialog?.recipeId
               ? []
               : [
                   {
@@ -332,6 +350,22 @@ export default function Planning({
             },
           ];
   async function save(action: string, d: Record<string, unknown>, key: string) {
+    if (action === "menu_save" && typeof d.menu_schedule === "string") {
+      const schedule = JSON.parse(d.menu_schedule) as MenuScheduleValue;
+      const { menu_schedule: _schedule, ...data } = d;
+      d = {
+        ...data,
+        date: schedule.period ? "" : schedule.date,
+        month: schedule.month,
+      };
+      if (schedule.period) {
+        d.period_start = schedule.start;
+        d.period_end = schedule.end;
+      } else {
+        delete d.period_start;
+        delete d.period_end;
+      }
+    }
     if (periodEditing) {
       if (!navigator.onLine)
         throw new Error(
@@ -348,6 +382,19 @@ export default function Planning({
       d = { ...d, date: "", month: start.slice(0, 7) + "-01" };
     }
     const result = await mutate(family, action, d, key);
+    if (periodEditing) {
+      setAnchor(String(d.period_start));
+      setPeriodDays(
+        String(
+          Math.round(
+            (Date.parse(String(d.period_end)) -
+              Date.parse(String(d.period_start))) /
+              86400000,
+          ) + 1,
+        ),
+      );
+      setMode("На несколько дней");
+    }
     await reload();
     notify(
       result.queued
@@ -1003,6 +1050,17 @@ export default function Planning({
           initial={{
             id: crypto.randomUUID(),
             recipe_id: dialog.recipeId ?? recipes[0]?.id,
+            ...(dialog.recipeId && dialog.action === "menu_save"
+              ? {
+                  menu_schedule: {
+                    period: !!dialog.period,
+                    date: dialog.day ?? "",
+                    month: range.from,
+                    start: anchor,
+                    end: periodEnd,
+                  },
+                }
+              : {}),
             month: range.from,
             date: dialog.day ?? (kind === "cooking" ? today() : ""),
             meal: "Ужин",

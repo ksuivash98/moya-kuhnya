@@ -3981,3 +3981,102 @@ test("общее меню на три дня: одна запись, общий 
     await b.close();
   }
 });
+
+test("из рецепта в меню: выбор общего периода, сохранение ввода и обычного дня", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const recipe = await b.save("Суп из рецепта на несколько дней");
+    await page.goto(`/recipes?recipe=${recipe.id}`);
+    await page
+      .getByRole("button", { name: "Добавить в меню", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog");
+    await expect(
+      dialog.getByRole("heading", { name: "Блюдо в меню", exact: true }),
+    ).toBeVisible();
+    await dialog.getByLabel("Количество порций", { exact: true }).fill("6");
+    await dialog
+      .getByLabel("Примечания", { exact: true })
+      .fill("На три дня для семьи");
+    const schedule = dialog.getByLabel("Добавить в меню", { exact: true });
+    await dialog
+      .getByLabel("Месяц списка (первое число)", { exact: true })
+      .fill("2030-03-01");
+    await dialog.getByLabel("Дата", { exact: true }).fill("2030-03-04");
+    await schedule.selectOption("period");
+    await dialog
+      .getByLabel("Начало периода", { exact: true })
+      .fill("2030-01-31");
+    await dialog
+      .getByLabel("Конец периода", { exact: true })
+      .fill("2030-02-02");
+    await schedule.selectOption("day");
+    await expect(dialog.getByLabel("Дата", { exact: true })).toHaveValue(
+      "2030-03-04",
+    );
+    await expect(
+      dialog.getByLabel("Месяц списка (первое число)", { exact: true }),
+    ).toHaveValue("2030-03-01");
+    await schedule.selectOption("period");
+    await expect(
+      dialog.getByLabel("Начало периода", { exact: true }),
+    ).toHaveValue("2030-01-31");
+    await expect(
+      dialog.getByLabel("Конец периода", { exact: true }),
+    ).toHaveValue("2030-02-02");
+    await expect(
+      dialog.getByLabel("Порций на весь период", { exact: true }),
+    ).toHaveValue("6");
+    await expect(dialog.getByLabel("Примечания", { exact: true })).toHaveValue(
+      "На три дня для семьи",
+    );
+    await dialog
+      .getByRole("button", { name: "Сохранить", exact: true })
+      .click();
+    await expect(dialog).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "На несколько дней", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(".planning-item")).toHaveCount(1);
+    await expect(page.locator(".planning-item")).toContainText(
+      "2030-01-31 — 2030-02-02",
+    );
+    const saved = await b.query<{
+      date: string | null;
+      period_start: string;
+      period_end: string;
+      servings: string;
+      notes: string;
+    }>(
+      "select date,period_start::text,period_end::text,servings::text,notes from public.menu_items where family_id=$1",
+      [b.family],
+    );
+    expect(saved.rows).toHaveLength(1);
+    expect(saved.rows[0]).toMatchObject({
+      date: null,
+      period_start: "2030-01-31",
+      period_end: "2030-02-02",
+      servings: "6.0000",
+      notes: "На три дня для семьи",
+    });
+    await page.goto(`/recipes?recipe=${recipe.id}`);
+    await page
+      .getByRole("button", { name: "Добавить в меню", exact: true })
+      .click();
+    await expect(schedule).toHaveValue("day");
+    await dialog.getByLabel("Дата", { exact: true }).fill("2030-03-04");
+    await dialog
+      .getByRole("button", { name: "Сохранить", exact: true })
+      .click();
+    await expect(dialog).toHaveCount(0);
+    const dates = await b.query(
+      "select count(*)::int as count from public.menu_items where family_id=$1 and date='2030-03-04' and period_start is null and period_end is null",
+      [b.family],
+    );
+    expect(dates.rows[0]).toMatchObject({ count: 1 });
+  } finally {
+    await b.close();
+  }
+});
