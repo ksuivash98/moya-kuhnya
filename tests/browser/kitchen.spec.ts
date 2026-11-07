@@ -4570,3 +4570,140 @@ test("овощи из покупок: свежие названия и штук�
     await b.close();
   }
 });
+
+test("сохранённые макароны: одна карточка 700 г без пересчёта, покупка и правка исходных позиций", async ({
+  page,
+}) => {
+  test.setTimeout(30000);
+  const b = await recipeBackend(page);
+  try {
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    const names = ["макароны (сухие)", "Макароны (рожки, спирали или перья)"];
+    const ids: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const product = crypto.randomUUID();
+      await mutate("product_save", {
+        id: product,
+        name: names[i],
+        unit: "г",
+        category: "Макароны",
+        minimum: 0,
+      });
+      const id = crypto.randomUUID();
+      ids.push(id);
+      await mutate("shopping_save", {
+        id,
+        product_id: product,
+        quantity: i === 0 ? 450 : 250,
+        unit: "г",
+        month: "2030-04-01",
+        status: "open",
+      });
+    }
+    await page.goto("/shopping?month=2030-04");
+    const cards = page.locator(".k-list article");
+    await expect(cards).toHaveCount(1);
+    await expect(
+      cards.first().getByRole("heading", { name: "Макароны", exact: true }),
+    ).toBeVisible();
+    await expect(cards.first().locator(".finance-item-quantity")).toHaveText(
+      "700 г",
+    );
+    await expect(cards.first()).toContainText("Объединено позиций: 2");
+    await page
+      .getByLabel("Категория списка", { exact: true })
+      .selectOption("Макароны");
+    await expect(cards).toHaveCount(1);
+    await cards
+      .first()
+      .getByRole("button", { name: "Куплено", exact: true })
+      .click();
+    const group = page.getByRole("dialog", {
+      name: "Позиции: Макароны",
+      exact: true,
+    });
+    const first = group
+      .locator(".k-item")
+      .filter({ has: page.getByText(names[0], { exact: true }) });
+    await first.getByRole("button", { name: "Куплено", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(
+      dialog.getByLabel("Фактически куплено", { exact: true }),
+    ).toHaveValue("450");
+    await dialog
+      .getByLabel("Стоимость всей покупки, ₽", { exact: true })
+      .fill("10");
+    await dialog
+      .getByRole("button", { name: "Сохранить", exact: true })
+      .click();
+    await expect(dialog).toHaveCount(0);
+    await expect(cards).toHaveCount(1);
+    await expect(cards.first().locator(".finance-item-quantity")).toHaveText(
+      "250 г",
+    );
+    const stock = (
+      await b.query<{ quantity: number }>(
+        "select sum(quantity)::float8 as quantity from public.stock_batches where family_id=$1",
+        [b.family],
+      )
+    ).rows[0].quantity;
+    expect(stock).toBe(450);
+    expect(
+      Number(
+        (
+          await b.query<{ amount: string }>(
+            "select sum(amount)::text as amount from public.financial_movements where family_id=$1",
+            [b.family],
+          )
+        ).rows[0].amount,
+      ),
+    ).toBe(10);
+    expect(
+      (
+        await b.query("select id from public.purchases where family_id=$1", [
+          b.family,
+        ])
+      ).rows,
+    ).toHaveLength(1);
+    await cards
+      .first()
+      .getByRole("button", { name: "Изменить / удалить", exact: true })
+      .click();
+    await dialog.getByLabel("Количество", { exact: true }).fill("200");
+    await dialog
+      .getByRole("button", { name: "Сохранить", exact: true })
+      .click();
+    await expect(dialog).toHaveCount(0);
+    await expect(cards.first().locator(".finance-item-quantity")).toHaveText(
+      "200 г",
+    );
+    const rows = (
+      await b.query<{ id: string; status: string; quantity: string }>(
+        "select id,status,quantity::text from public.shopping_items where family_id=$1",
+        [b.family],
+      )
+    ).rows;
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: ids[0],
+          status: "purchased",
+          quantity: "450.0000",
+        }),
+        expect.objectContaining({
+          id: ids[1],
+          status: "open",
+          quantity: "200.0000",
+        }),
+      ]),
+    );
+  } finally {
+    await b.close();
+  }
+});

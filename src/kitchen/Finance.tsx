@@ -1,3 +1,4 @@
+import { shoppingGroups } from "./shopping-groups";
 import ShoppingCategories, {
   type CategorySuggestion,
 } from "./ShoppingCategories";
@@ -95,6 +96,10 @@ export default function Finance({
   const [categoryReview, setCategoryReview] = useState<
     CategorySuggestion[] | null
   >(null);
+  const [groupAction, setGroupAction] = useState<{
+    id: string;
+    action: "purchase_confirm" | "shopping_save";
+  } | null>(null);
   const [productBusy, setProductBusy] = useState(false);
   useEffect(() => {
     setCategory("");
@@ -354,9 +359,23 @@ export default function Finance({
         suggestedProducts.add(product.id);
       }
     }
-  const list = allItems.filter(
-    (r) => !category || str(r, "category") === category,
-  );
+  const groups = shopping ? shoppingGroups(allItems, products) : [];
+  const groupsById = new Map(groups.map((group) => [group.display.id, group]));
+  const selectedGroup = groupAction
+    ? groupsById.get(groupAction.id)
+    : undefined;
+  function openShoppingItem(
+    row: Row,
+    action: "purchase_confirm" | "shopping_save",
+  ) {
+    const group = groupsById.get(row.id);
+    if (group && group.members.length > 1)
+      setGroupAction({ id: row.id, action });
+    else setDialog({ action, row: group?.members[0] ?? row });
+  }
+  const list = (
+    shopping ? groups.map((group) => group.display) : allItems
+  ).filter((r) => !category || str(r, "category") === category);
   const categories = [
     ...new Set([
       ...productCategories,
@@ -365,6 +384,46 @@ export default function Finance({
   ].filter(Boolean);
   return (
     <>
+      {selectedGroup && groupAction && (
+        <Modal
+          title={`Позиции: ${selectedGroup.name}`}
+          onClose={() => setGroupAction(null)}
+        >
+          <p className="muted">
+            Всего: {fmt(num(selectedGroup.display, "quantity"))}{" "}
+            {str(selectedGroup.display, "unit")}. Выберите позицию, которую
+            купили или хотите изменить. Сумма на карточке включает все позиции
+            ниже.
+          </p>
+          <div className="form-stack">
+            {selectedGroup.members.map((item) => (
+              <div className="k-item" key={item.id}>
+                <strong>
+                  {str(
+                    products.find((p) => p.id === item.product_id),
+                    "name",
+                  )}
+                </strong>
+                <p>
+                  {fmt(num(item, "quantity"))} {str(item, "unit")}
+                </p>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    setDialog({ action: groupAction.action, row: item });
+                    setGroupAction(null);
+                  }}
+                >
+                  {groupAction.action === "purchase_confirm"
+                    ? "Куплено"
+                    : "Изменить / удалить"}
+                </button>
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
       {shopping && params.get("recipe") && canEdit && (
         <div className="notice">
           <p>
@@ -651,38 +710,33 @@ export default function Finance({
           <article className="k-item finance-item" key={r.id}>
             <div className="finance-item-title">
               <span className="pill quiet">{str(r, "category")}</span>
-              <h3>
-                {shopping
-                  ? str(
-                      products.find((p) => p.id === r.product_id),
-                      "name",
-                    )
-                  : str(r, "title")}
-              </h3>
+              <h3>{shopping ? groupsById.get(r.id)?.name : str(r, "title")}</h3>
             </div>
             <strong className="finance-item-quantity">
               {shopping
                 ? `${fmt(num(r, "quantity"))} ${str(r, "unit")}`
                 : rub(num(r, "amount"))}
             </strong>
+            {shopping && (groupsById.get(r.id)?.members.length ?? 0) > 1 && (
+              <small>
+                Объединено позиций: {groupsById.get(r.id)!.members.length}
+              </small>
+            )}
             <div className="k-actions finance-item-actions">
               {canEdit && (
                 <>
                   {shopping && (
                     <button
-                      onClick={() =>
-                        setDialog({ action: "purchase_confirm", row: r })
-                      }
+                      onClick={() => openShoppingItem(r, "purchase_confirm")}
                     >
                       Куплено
                     </button>
                   )}
                   <button
                     onClick={() =>
-                      setDialog({
-                        action: shopping ? "shopping_save" : "expense_save",
-                        row: r,
-                      })
+                      shopping
+                        ? openShoppingItem(r, "shopping_save")
+                        : setDialog({ action: "expense_save", row: r })
                     }
                   >
                     Изменить{shopping ? " / удалить" : ""}
