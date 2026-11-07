@@ -88,3 +88,46 @@ test("сохранённое ранее соответствие масла дл
   expect(ingredientChoice(unchanged, mixture)).toEqual({ sourceId: "mixture" });
   expect(setIngredientChoice(unchanged, mixture)).toEqual({});
 });
+
+test("обычные макароны: сорт пшеницы и выбор формы объединяются в общий килограмм", () => {
+  const result = combineIngredientNeeds([
+    need("Макароны из твёрдых сортов пшеницы", 750, "г"),
+    need("Макароны (рожки, спирали или перья)", 0.25, "кг"),
+  ]);
+  expect(result).toMatchObject([
+    { name: "Макароны", quantity: 1000, unit: "г" },
+  ]);
+  expect(result).toHaveLength(1);
+  const matched = matchIngredients(
+    result,
+    [
+      {
+        id: "pasta",
+        name: "Макароны (рожки, спирали или перья)",
+        kind: "product",
+        unit: "г",
+        quantity: 250,
+        expires: "",
+      },
+    ],
+    {},
+  );
+  expect(matched[0]).toMatchObject({ available: 250, missing: 750 });
+  expect(
+    ingredientChoice(
+      { "rule:из макароны пшеницы сортов твердых|г": { sourceId: "pasta" } },
+      result[0],
+    ),
+  ).toEqual({ sourceId: "pasta" });
+});
+test("макароны с другой мукой, начинкой и после варки остаются отдельными продуктами", () => {
+  const result = combineIngredientNeeds([
+    need("Макароны", 100, "г"),
+    need("Макароны отварные", 100, "г"),
+    need("Макароны без глютена", 100, "г"),
+    need("Макароны рисовые", 100, "г"),
+    need("Макароны с сыром", 100, "г"),
+    need("Макароны цельнозерновые", 100, "г"),
+  ]);
+  expect(result).toHaveLength(6);
+});

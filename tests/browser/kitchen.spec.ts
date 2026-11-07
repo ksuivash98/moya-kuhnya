@@ -4300,3 +4300,100 @@ test("категории после расчёта: уточнённые наз�
     await b.close();
   }
 });
+
+test("макароны: разные формы и описание пшеницы дают одну покупку с общим остатком", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const names = [
+      "Макароны из твёрдых сортов пшеницы",
+      "Макароны (рожки, спирали или перья)",
+    ];
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    for (let i = 0; i < names.length; i++) {
+      const recipe = await b.save("Блюдо с макаронами " + i);
+      recipe.data.ingredients = [
+        {
+          ...recipe.data.ingredients[0],
+          name: names[i],
+          amount: i === 0 ? "750" : "250",
+          unit: "г",
+        },
+      ];
+      await b.query("select public.save_recipe($1,$2,$3,1)", [
+        recipe.id,
+        b.family,
+        recipe.data,
+      ]);
+      await mutate("menu_save", {
+        id: crypto.randomUUID(),
+        recipe_id: recipe.id,
+        date: "2030-04-01",
+        month: "2030-04-01",
+        servings: recipe.data.servings,
+        meal: "Обед",
+        planned_count: 1,
+        status: "Запланировано",
+      });
+    }
+    // Воспроизводим уже созданные две автоматические позиции старого расчёта.
+    await mutate("shopping_generate", { month: "2030-04-01" });
+    const open = () =>
+      b.query<{ product_id: string; quantity: string }>(
+        "select product_id,quantity::text from public.shopping_items where family_id=$1 and status='open'",
+        [b.family],
+      );
+    expect((await open()).rows).toHaveLength(2);
+    await page.goto("/menu?month=2030-04");
+    const panel = page
+      .locator("section.panel")
+      .filter({
+        has: page.getByRole("heading", {
+          name: "Ингредиенты плана",
+          exact: true,
+        }),
+      });
+    await expect(panel.locator("tbody tr")).toHaveCount(1);
+    await expect(
+      panel.locator("tbody tr").first().locator("td").nth(1),
+    ).toHaveText(/^1\s*000\s*г$/);
+    await page.goto("/shopping?month=2030-04");
+    const calculate = page.getByRole("button", {
+      name: "Рассчитать недостающие продукты",
+      exact: true,
+    });
+    await calculate.click();
+    await expect(calculate).toBeEnabled();
+    expect((await open()).rows.map((r) => Number(r.quantity))).toEqual([1000]);
+    await expect(page.locator(".k-list article")).toHaveCount(1);
+    const second = (
+      await b.query<{ id: string }>(
+        "select id from public.products where family_id=$1 and name_key=$2",
+        [b.family, names[1].toLowerCase()],
+      )
+    ).rows[0].id;
+    await mutate("batch_save", {
+      id: crypto.randomUUID(),
+      product_id: second,
+      quantity: 250,
+      unit: "г",
+      purchased_on: "2030-04-01",
+      reason: "Ручное добавление",
+    });
+    await calculate.click();
+    await expect(calculate).toBeEnabled();
+    expect((await open()).rows.map((r) => Number(r.quantity))).toEqual([750]);
+    await calculate.click();
+    await expect(calculate).toBeEnabled();
+    expect((await open()).rows.map((r) => Number(r.quantity))).toEqual([750]);
+  } finally {
+    await b.close();
+  }
+});

@@ -56,14 +56,46 @@ const aliases: Record<string, string> = {
   молока: "молоко",
   воды: "вода",
 };
+// Shape and ordinary durum-wheat descriptions identify the same dry product.
+// Cooking state, fillings and special flours stay part of the identity.
+function plainPasta(name: string) {
+  const words = name
+    .toLocaleLowerCase("ru")
+    .replace(/ё/g, "е")
+    .replace(/[^а-яa-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/);
+  const allowed = new Set([
+    "макароны",
+    "макарон",
+    "из",
+    "твердых",
+    "твердые",
+    "сортов",
+    "сорта",
+    "пшеницы",
+    "рожки",
+    "спирали",
+    "перья",
+    "или",
+    "и",
+    "сухие",
+    "сухой",
+  ]);
+  return (
+    words.some((w) => w === "макароны" || w === "макарон") &&
+    words.every((w) => allowed.has(w))
+  );
+}
 export function ingredientDisplayName(name: string): string {
-  return name
+  const display = name
     .replace(
       /\s+(?:\(\s*)?для\s+(?:зажарки|обжарки|жарки|подачи|смазывания(?:\s+(?:формы|сковороды))?|тушения)\s*\)?\s*$/iu,
       "",
     )
     .replace(/[,\s]+$/u, "")
     .trim();
+  return plainPasta(display) ? "Макароны" : display;
 }
 export function ingredientName(name: string): string {
   let words = ingredientDisplayName(name)
