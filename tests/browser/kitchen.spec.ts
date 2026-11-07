@@ -4819,3 +4819,81 @@ test("специи: паприка одной суммой, укроп в гра
     await b.close();
   }
 });
+
+test("консервы: кукуруза и томатная паста с разными единицами — по одной карточке", async ({
+  page,
+}) => {
+  test.setTimeout(30000);
+  const b = await recipeBackend(page);
+  try {
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    const entries = [
+      ["консервированная кукуруза", 350, "г"],
+      ["консервированная кукуруза", 1.5, "упаковка"],
+      ["томатная паста", 40, "г"],
+      ["томатная паста", 22.5, "мл"],
+      ["томатный соус", 264, "г"],
+      ["консервированные ананасы", 225, "г"],
+      ["красная консервированная фасоль", 1.5, "упаковка"],
+    ] as const;
+    const products = new Map<string, string>();
+    for (const [name, quantity, unit] of entries) {
+      let product = products.get(name);
+      if (!product) {
+        product = crypto.randomUUID();
+        products.set(name, product);
+        await mutate("product_save", {
+          id: product,
+          name,
+          unit,
+          category: "Консервы",
+          minimum: 0,
+        });
+      }
+      await mutate("shopping_save", {
+        id: crypto.randomUUID(),
+        product_id: product,
+        quantity,
+        unit,
+        month: "2030-04-01",
+        status: "open",
+      });
+    }
+    await page.goto("/shopping?month=2030-04");
+    await page
+      .getByLabel("Категория списка", { exact: true })
+      .selectOption("Консервы");
+    const cards = page.locator(".k-list article");
+    await expect(cards).toHaveCount(5);
+    const card = (name: string) =>
+      cards.filter({ has: page.getByRole("heading", { name, exact: true }) });
+    await expect(
+      card("консервированная кукуруза").locator(".finance-item-quantity"),
+    ).toHaveText("350 г + 1,5 упаковка");
+    await expect(
+      card("томатная паста").locator(".finance-item-quantity"),
+    ).toHaveText("40 г + 22,5 мл");
+    await expect(
+      card("томатный соус").locator(".finance-item-quantity"),
+    ).toHaveText("264 г");
+    expect(
+      (
+        await b.query(
+          "select id from public.shopping_items where family_id=$1 and status='open'",
+          [b.family],
+        )
+      ).rows,
+    ).toHaveLength(7);
+    await expect(
+      page.getByLabel("Категория списка", { exact: true }),
+    ).toHaveAttribute("data-shell-filter", "true");
+  } finally {
+    await b.close();
+  }
+});

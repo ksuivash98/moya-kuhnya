@@ -4,7 +4,7 @@ let win: EventTarget & { location: { reload: ReturnType<typeof vi.fn> } };
 let doc: EventTarget & {
   visibilityState: string;
   querySelector: ReturnType<typeof vi.fn>;
-  activeElement: { matches: () => boolean } | null;
+  activeElement: { matches: (selector: string) => boolean } | null;
 };
 let connection: { onLine: boolean };
 let stop: (() => void) | undefined;
@@ -65,12 +65,25 @@ test("новая версия не перезагружает открытую �
   await vi.advanceTimersByTimeAsync(2000);
   expect(win.location.reload).not.toHaveBeenCalled();
   doc.querySelector.mockReturnValue(null);
-  doc.activeElement = { matches: () => true };
+  doc.activeElement = {
+    matches: (selector) => selector !== "[data-shell-filter]",
+  };
   await vi.advanceTimersByTimeAsync(1000);
   expect(win.location.reload).not.toHaveBeenCalled();
   doc.activeElement = null;
   await vi.advanceTimersByTimeAsync(1000);
   expect(win.location.reload).toHaveBeenCalledTimes(1);
   await vi.advanceTimersByTimeAsync(5000);
+  expect(win.location.reload).toHaveBeenCalledTimes(1);
+});
+
+test("фокус на фильтре категории не удерживает старую версию, открытая форма всё равно защищена", async () => {
+  doc.activeElement = { matches: () => true };
+  doc.querySelector.mockReturnValue({});
+  reloadShellWhenSafe();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(win.location.reload).not.toHaveBeenCalled();
+  doc.querySelector.mockReturnValue(null);
+  await vi.advanceTimersByTimeAsync(1000);
   expect(win.location.reload).toHaveBeenCalledTimes(1);
 });

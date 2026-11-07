@@ -31,9 +31,10 @@ export function reloadShellWhenSafe() {
     if (
       document.visibilityState === "hidden" ||
       document.querySelector("dialog[open], form") ||
-      document.activeElement?.matches(
+      (document.activeElement?.matches(
         "input, textarea, select, [contenteditable=true]",
-      )
+      ) &&
+        !document.activeElement.matches("[data-shell-filter]"))
     )
       return;
     window.clearInterval(timer);
