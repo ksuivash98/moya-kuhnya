@@ -4897,3 +4897,143 @@ test("консервы: кукуруза и томатная паста с ра�
     await b.close();
   }
 });
+
+test("покупки по образцу: категории, компактные строки, круглая покупка и сохранённые виды", async ({
+  page,
+}, info) => {
+  const b = await recipeBackend(page);
+  try {
+    await page.addInitScript(() =>
+      localStorage.setItem("kitchen-theme", "dark"),
+    );
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    const add = async (name: string, category: string, quantity: number) => {
+      const id = crypto.randomUUID();
+      await mutate("product_save", {
+        id,
+        name,
+        category,
+        unit: "г",
+        minimum: 0,
+      });
+      await mutate("shopping_save", {
+        id: crypto.randomUUID(),
+        product_id: id,
+        quantity,
+        unit: "г",
+        month: "2030-04-01",
+        status: "open",
+      });
+    };
+    for (const [name, category, quantity] of [
+      ["Курица для бульонов", "Мясо", 4500],
+      ["Куриное филе для блюд и салатов", "Мясо", 3250],
+      ["Фарш мясной для котлет", "Мясо", 3250],
+      ["Минтай филе", "Рыба", 1250],
+      ["Сёмга филе", "Рыба", 1250],
+      ["Картофель", "Овощи", 10000],
+      ["Морковь", "Овощи", 2250],
+      ["Лук репчатый", "Овощи", 2750],
+      ["Капуста белокочанная", "Овощи", 2250],
+      ["Шампиньоны", "Овощи", 500],
+    ] as const)
+      await add(name, category, quantity);
+    await page.goto("/shopping?month=2030-04");
+    const categories = page.locator(".shopping-category-section > h2");
+    await expect(
+      page.getByRole("button", { name: "По категориям", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(categories).toHaveText([
+      "Мясо, птица и фарш",
+      "Рыба",
+      "Овощи, зелень и грибы",
+    ]);
+    const rows = page.locator(".shopping-checklist-row");
+    await expect(rows).toHaveCount(10);
+    const first = rows.first();
+    await expect(
+      first.getByRole("button", { name: "Куплено", exact: true }),
+    ).toHaveClass(/shopping-check/);
+    const bounds = await first.boundingBox();
+    expect(bounds!.height).toBeLessThanOrEqual(64);
+    const title = await first.locator(".finance-item-title").boundingBox();
+    const quantity = await first
+      .locator(".finance-item-quantity")
+      .boundingBox();
+    expect(quantity!.x).toBeGreaterThanOrEqual(title!.x + title!.width);
+    expect(
+      await page.locator("body").evaluate((el) => el.scrollWidth <= innerWidth),
+    ).toBe(true);
+    await page
+      .locator(".shopping-checklist")
+      .screenshot({
+        path: `/tmp/shopping-checklist-${info.project.name}.png`,
+        style: ".topbar, .bottom-nav { visibility: hidden !important; }",
+      });
+    await first.getByRole("button", { name: "Куплено", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(
+      dialog.getByRole("heading", {
+        name: "Подтвердить фактическую покупку",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await dialog.getByRole("button", { name: "Отмена", exact: true }).click();
+    expect(
+      (
+        await b.query("select id from public.purchases where family_id=$1", [
+          b.family,
+        ])
+      ).rows,
+    ).toHaveLength(0);
+    for (let i = 1; i <= 12; i++)
+      await add(`Продукт дополнительной группы ${i}`, "Молочные продукты", 100);
+    await page.reload();
+    await expect(rows).toHaveCount(22);
+    await expect(
+      page.getByRole("button", { name: "Далее", exact: true }),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "Плитка", exact: true }).click();
+    await expect(page.locator(".shopping-grid > article")).toHaveCount(20);
+    await expect(
+      page.getByRole("button", { name: "Далее", exact: true }),
+    ).toBeEnabled();
+    await page.getByRole("button", { name: "Строки", exact: true }).click();
+    await expect(page.locator(".shopping-grid")).toHaveClass(
+      /list-layout--list/,
+    );
+    await page
+      .getByRole("button", { name: "По категориям", exact: true })
+      .click();
+    await page.reload();
+    await expect(rows).toHaveCount(22);
+    await page
+      .getByLabel("Категория списка", { exact: true })
+      .selectOption("Овощи");
+    await expect(rows).toHaveCount(5);
+    await expect(categories).toHaveText(["Овощи, зелень и грибы"]);
+    for (const width of [320, 768, 1366]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(
+        await page
+          .locator("body")
+          .evaluate((el) => el.scrollWidth <= innerWidth),
+      ).toBe(true);
+    }
+    await page
+      .getByRole("button", { name: "Включить светлую тему", exact: true })
+      .click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    expect(
+      await page.locator("body").evaluate((el) => el.scrollWidth <= innerWidth),
+    ).toBe(true);
+  } finally {
+    await b.close();
+  }
+});

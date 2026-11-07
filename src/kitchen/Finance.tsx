@@ -1,3 +1,4 @@
+import { Check, MoreHorizontal } from "lucide-react";
 import {
   shoppingGroups,
   shoppingGroupQuantity,
@@ -96,6 +97,21 @@ export default function Finance({
     [month, from, to, planKind, calculationPeriod],
   );
   const [layout, setLayout] = useListLayout(kind);
+  const [categoryLayout, setCategoryLayout] = useState(() => {
+    try {
+      return localStorage.getItem("kitchen-shopping-categories") !== "off";
+    } catch {
+      return true;
+    }
+  });
+  function chooseCategoryLayout(value: boolean) {
+    setCategoryLayout(value);
+    try {
+      localStorage.setItem("kitchen-shopping-categories", value ? "on" : "off");
+    } catch {
+      /* Вид доступен и без хранилища. */
+    }
+  }
   const [category, setCategory] = useState("");
   const [categoryReview, setCategoryReview] = useState<
     CategorySuggestion[] | null
@@ -386,6 +402,107 @@ export default function Finance({
       ...allItems.map((r) => str(r, "category")),
     ]),
   ].filter(Boolean);
+  const checklist = shopping && categoryLayout;
+  const sectionTitles: Record<string, string> = {
+    Мясо: "Мясо, птица и фарш",
+    Овощи: "Овощи, зелень и грибы",
+  };
+  const sectionOrder = [
+    ...new Set([
+      "Мясо",
+      "Рыба",
+      "Овощи",
+      "Фрукты",
+      ...categories.filter((c) => c !== "Другое"),
+      "Другое",
+    ]),
+  ];
+  const sections = sectionOrder
+    .map((name) => ({
+      name,
+      title: sectionTitles[name] ?? name,
+      items: list.filter((r) => str(r, "category") === name),
+    }))
+    .filter((section) => section.items.length);
+  function renderItem(r: Row) {
+    const name = shopping ? groupsById.get(r.id)!.name : str(r, "title");
+    const members = shopping ? groupsById.get(r.id)!.members.length : 1;
+    const headingId = `shopping-item-${r.id}`;
+    return (
+      <article
+        className={`k-item finance-item ${checklist ? "shopping-checklist-row" : ""}`}
+        key={r.id}
+      >
+        {checklist &&
+          (canEdit ? (
+            <button
+              type="button"
+              className="shopping-check"
+              aria-label="Куплено"
+              aria-describedby={headingId}
+              aria-haspopup="dialog"
+              title={`Подтвердить покупку: ${name}`}
+              disabled={busy || productBusy}
+              onClick={() => openShoppingItem(r, "purchase_confirm")}
+            >
+              <Check size={13} aria-hidden="true" />
+            </button>
+          ) : (
+            <span
+              className="shopping-check shopping-check--readonly"
+              aria-hidden="true"
+            />
+          ))}
+        <div className="finance-item-title">
+          <span className="pill quiet">{str(r, "category")}</span>
+          <h3 id={headingId}>{name}</h3>
+          {checklist && members > 1 && (
+            <small className="shopping-group-note">
+              Объединено позиций: {members}
+            </small>
+          )}
+        </div>
+        <strong className="finance-item-quantity">
+          {shopping
+            ? shoppingGroupQuantity(groupsById.get(r.id)!)
+            : rub(num(r, "amount"))}
+        </strong>
+        {!checklist && shopping && members > 1 && (
+          <small>Объединено позиций: {members}</small>
+        )}
+        <div className="k-actions finance-item-actions">
+          {canEdit && (
+            <>
+              {shopping && !checklist && (
+                <button onClick={() => openShoppingItem(r, "purchase_confirm")}>
+                  Куплено
+                </button>
+              )}
+              <button
+                type="button"
+                className={checklist ? "shopping-edit" : undefined}
+                aria-label={checklist ? "Изменить / удалить" : undefined}
+                aria-describedby={checklist ? headingId : undefined}
+                title={checklist ? `Изменить / удалить: ${name}` : undefined}
+                aria-haspopup="dialog"
+                onClick={() =>
+                  shopping
+                    ? openShoppingItem(r, "shopping_save")
+                    : setDialog({ action: "expense_save", row: r })
+                }
+              >
+                {checklist ? (
+                  <MoreHorizontal size={17} aria-hidden="true" />
+                ) : (
+                  <>Изменить{shopping ? " / удалить" : ""}</>
+                )}
+              </button>
+            </>
+          )}
+        </div>
+      </article>
+    );
+  }
   return (
     <>
       {selectedGroup && groupAction && (
@@ -701,7 +818,28 @@ export default function Finance({
             ))}
           </select>
         </label>
-        <LayoutToggle value={layout} onChange={setLayout} />
+        {shopping ? (
+          <div className="shopping-view-options">
+            <button
+              type="button"
+              className="secondary shopping-category-toggle"
+              aria-pressed={checklist}
+              onClick={() => chooseCategoryLayout(true)}
+            >
+              По категориям
+            </button>
+            <LayoutToggle
+              value={layout}
+              active={!checklist}
+              onChange={(value) => {
+                chooseCategoryLayout(false);
+                setLayout(value);
+              }}
+            />
+          </div>
+        ) : (
+          <LayoutToggle value={layout} onChange={setLayout} />
+        )}
       </div>
       <p className="help-text">
         {shopping
@@ -717,51 +855,31 @@ export default function Finance({
               : "За выбранный месяц расходов нет."}
         </div>
       )}
-      <div
-        className={`k-list ${shopping ? "shopping-grid" : ""} list-layout list-layout--${layout}`}
-      >
-        {list.slice(page * 20, (page + 1) * 20).map((r) => (
-          <article className="k-item finance-item" key={r.id}>
-            <div className="finance-item-title">
-              <span className="pill quiet">{str(r, "category")}</span>
-              <h3>{shopping ? groupsById.get(r.id)?.name : str(r, "title")}</h3>
-            </div>
-            <strong className="finance-item-quantity">
-              {shopping
-                ? shoppingGroupQuantity(groupsById.get(r.id)!)
-                : rub(num(r, "amount"))}
-            </strong>
-            {shopping && (groupsById.get(r.id)?.members.length ?? 0) > 1 && (
-              <small>
-                Объединено позиций: {groupsById.get(r.id)!.members.length}
-              </small>
-            )}
-            <div className="k-actions finance-item-actions">
-              {canEdit && (
-                <>
-                  {shopping && (
-                    <button
-                      onClick={() => openShoppingItem(r, "purchase_confirm")}
-                    >
-                      Куплено
-                    </button>
-                  )}
-                  <button
-                    onClick={() =>
-                      shopping
-                        ? openShoppingItem(r, "shopping_save")
-                        : setDialog({ action: "expense_save", row: r })
-                    }
-                  >
-                    Изменить{shopping ? " / удалить" : ""}
-                  </button>
-                </>
-              )}
-            </div>
-          </article>
-        ))}
-      </div>
-      {list.length > 20 && (
+      {checklist ? (
+        <div className="k-list shopping-checklist" aria-label="Нужно купить">
+          {sections.map((section) => (
+            <section
+              key={section.name}
+              className="shopping-category-section"
+              aria-label={section.title}
+            >
+              <h2>{section.title}</h2>
+              <ul className="shopping-category-items">
+                {section.items.map((r) => (
+                  <li key={r.id}>{renderItem(r)}</li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      ) : (
+        <div
+          className={`k-list ${shopping ? "shopping-grid" : ""} list-layout list-layout--${layout}`}
+        >
+          {list.slice(page * 20, (page + 1) * 20).map(renderItem)}
+        </div>
+      )}
+      {!checklist && list.length > 20 && (
         <div className="k-pagination">
           <button
             className="secondary"
