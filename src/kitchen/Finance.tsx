@@ -16,6 +16,7 @@ import {
   rub,
   fmt,
   today,
+  addDays,
   productCategories,
   stockUnits,
   monthRange,
@@ -33,17 +34,45 @@ export default function Finance({
   notify,
 }: ModuleProps & { kind: string; userId: string }) {
   const [params] = useSearchParams();
-  const from = params.get("plan_from") ?? "",
-    to = params.get("plan_to") ?? "";
-  const dated =
-    /^\d{4}-\d{2}-\d{2}$/.test(from) &&
-    /^\d{4}-\d{2}-\d{2}$/.test(to) &&
-    from <= to &&
-    to >= month + "-01" &&
-    from <= monthRange(month).to &&
-    Number.isFinite(Date.parse(from)) &&
-    Number.isFinite(Date.parse(to)) &&
-    (Date.parse(to) - Date.parse(from)) / 86400000 <= 31;
+  const requestedFrom = params.get("plan_from") ?? "",
+    requestedTo = params.get("plan_to") ?? "";
+  const validDate = (value: string) =>
+    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    Number.isFinite(Date.parse(value)) &&
+    new Date(value).toISOString().slice(0, 10) === value;
+  const validRequested =
+    validDate(requestedFrom) &&
+    validDate(requestedTo) &&
+    requestedFrom <= requestedTo;
+  const initialMode = validRequested
+    ? requestedFrom === requestedTo
+      ? "day"
+      : "range"
+    : "month";
+  const defaultStart = month === today().slice(0, 7) ? today() : month + "-01";
+  const [calculationPeriod, setCalculationPeriod] = useState(initialMode);
+  const [from, setFrom] = useState(
+    validRequested ? requestedFrom : defaultStart,
+  );
+  const [rangeEnd, setRangeEnd] = useState(
+    validRequested ? requestedTo : addDays(defaultStart, 2),
+  );
+  useEffect(() => {
+    setCalculationPeriod(initialMode);
+    setFrom(validRequested ? requestedFrom : defaultStart);
+    setRangeEnd(validRequested ? requestedTo : addDays(defaultStart, 2));
+  }, [month, requestedFrom, requestedTo]);
+  const to =
+    calculationPeriod === "day"
+      ? from
+      : calculationPeriod === "week" && validDate(from)
+        ? addDays(from, 6)
+        : rangeEnd;
+  const dated = calculationPeriod !== "month";
+  const periodError =
+    dated && (!validDate(from) || !validDate(to) || to < from)
+      ? "Укажите корректные даты начала и конца периода."
+      : "";
   const planKind = params.get("plan_kind");
   const scope: PlanScope = {
     month,
@@ -53,7 +82,10 @@ export default function Finance({
       : {}),
   };
   const [calculationWarnings, setCalculationWarnings] = useState<string[]>([]);
-  useEffect(() => setCalculationWarnings([]), [month, from, to, planKind]);
+  useEffect(
+    () => setCalculationWarnings([]),
+    [month, from, to, planKind, calculationPeriod],
+  );
   const [layout, setLayout] = useListLayout(kind);
   const [category, setCategory] = useState("");
   const [productBusy, setProductBusy] = useState(false);
@@ -260,6 +292,7 @@ export default function Finance({
               },
             ];
   async function generate() {
+    if (periodError || busy) return;
     setBusy(true);
     try {
       const result = await syncShopping(family, userId, scope);
@@ -370,9 +403,68 @@ export default function Finance({
           </button>
         </div>
       )}
+      {shopping && canEdit && (
+        <fieldset className="shopping-period-settings panel" disabled={busy}>
+          <legend>Период расчёта продуктов</legend>
+          <label>
+            Рассчитать за
+            <select
+              aria-label="Рассчитать за"
+              value={calculationPeriod}
+              onChange={(e) => setCalculationPeriod(e.target.value)}
+            >
+              <option value="month">Выбранный месяц</option>
+              <option value="day">Один день</option>
+              <option value="week">7 дней</option>
+              <option value="range">Несколько дней</option>
+            </select>
+          </label>
+          {dated && (
+            <label>
+              {calculationPeriod === "day" ? "Дата расчёта" : "Начало расчёта"}
+              <input
+                type="date"
+                aria-label={
+                  calculationPeriod === "day"
+                    ? "Дата расчёта"
+                    : "Начало расчёта"
+                }
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+              />
+            </label>
+          )}
+          {calculationPeriod === "range" && (
+            <label>
+              Конец расчёта
+              <input
+                type="date"
+                aria-label="Конец расчёта"
+                value={rangeEnd}
+                onChange={(e) => setRangeEnd(e.target.value)}
+              />
+            </label>
+          )}
+          <p className="muted">
+            Расчёт заменяет автоматические позиции выбранного месяца {month}.
+            Ручные позиции и история покупок сохраняются. Для общего меню на
+            несколько дней учитывается вся потребность периода один раз.
+          </p>
+          {periodError && (
+            <p className="error" role="alert">
+              {periodError}
+            </p>
+          )}
+        </fieldset>
+      )}
       {shopping && (
         <p className="muted">
-          Расчёт: {dated ? `${from} — ${to}` : `месяц ${month}`}
+          Расчёт:{" "}
+          {periodError
+            ? "уточните даты"
+            : dated
+              ? `${from} — ${to}`
+              : `месяц ${month}`}
           {scope.kind === "menu"
             ? ", меню"
             : scope.kind === "cooking"
@@ -411,7 +503,7 @@ export default function Finance({
               <>
                 <button
                   className="primary"
-                  disabled={busy || !navigator.onLine}
+                  disabled={busy || !navigator.onLine || !!periodError}
                   onClick={() => void generate()}
                 >
                   Рассчитать недостающие продукты

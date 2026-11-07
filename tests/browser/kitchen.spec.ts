@@ -4080,3 +4080,93 @@ test("из рецепта в меню: выбор общего периода, �
     await b.close();
   }
 });
+
+test("покупки: выбор дня, недели и диапазона для расчёта недостающих продуктов", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const recipe = await b.save("Блюдо для периода покупок");
+    for (const date of [
+      "2030-04-01",
+      "2030-04-03",
+      "2030-04-10",
+      "2030-04-20",
+      "",
+    ]) {
+      await b.query("select public.kitchen_mutate($1,$2,'menu_save',$3)", [
+        b.family,
+        crypto.randomUUID(),
+        {
+          id: crypto.randomUUID(),
+          recipe_id: recipe.id,
+          date,
+          month: "2030-04-01",
+          meal: "Обед",
+          servings: recipe.data.servings,
+          planned_count: 1,
+          status: "Запланировано",
+          ...(date
+            ? {}
+            : { period_start: "2030-04-02", period_end: "2030-04-04" }),
+        },
+      ]);
+    }
+    await page.goto("/shopping?month=2030-04");
+    const period = page.getByLabel("Рассчитать за", { exact: true });
+    const calculate = page.getByRole("button", {
+      name: "Рассчитать недостающие продукты",
+      exact: true,
+    });
+    await expect(period).toHaveValue("month");
+    const quantity = async () =>
+      Number(
+        (
+          await b.query<{ quantity: string }>(
+            "select coalesce(sum(s.quantity),0)::text as quantity from public.shopping_items s join public.products p on p.id=s.product_id where s.family_id=$1 and s.month='2030-04-01' and s.status='open' and p.name=$2",
+            [b.family, recipe.data.ingredients[0].name],
+          )
+        ).rows[0].quantity,
+      );
+    const check = async (needed: number) => {
+      await calculate.click();
+      await expect(calculate).toBeEnabled();
+      await expect.poll(quantity).toBe(needed);
+    };
+    await period.selectOption("day");
+    await page.getByLabel("Дата расчёта", { exact: true }).fill("2030-04-01");
+    await check(500);
+    await period.selectOption("week");
+    await expect(
+      page.getByText("Расчёт: 2030-04-01 — 2030-04-07", { exact: false }),
+    ).toBeVisible();
+    await check(1500);
+    await period.selectOption("range");
+    await page.getByLabel("Начало расчёта", { exact: true }).fill("2030-04-02");
+    await page.getByLabel("Конец расчёта", { exact: true }).fill("2030-04-04");
+    await check(1000);
+    await page.getByLabel("Конец расчёта", { exact: true }).fill("2030-04-01");
+    await expect(calculate).toBeDisabled();
+    await expect(page.getByRole("alert")).toContainText(
+      "Укажите корректные даты",
+    );
+    expect(await quantity()).toBe(1000);
+    await period.selectOption("month");
+    await check(2500);
+    await page.goto(
+      "/shopping?month=2030-04&plan_kind=menu&plan_from=2030-04-10&plan_to=2030-04-10",
+    );
+    await expect(period).toHaveValue("day");
+    await expect(page.getByLabel("Дата расчёта", { exact: true })).toHaveValue(
+      "2030-04-10",
+    );
+    await check(500);
+    expect(
+      await page
+        .locator("body")
+        .evaluate((el) => el.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  } finally {
+    await b.close();
+  }
+});
