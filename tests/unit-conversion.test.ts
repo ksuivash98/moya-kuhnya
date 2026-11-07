@@ -190,3 +190,39 @@ test("недостающее для покупки автоматически п
     0,
   );
 });
+
+test("овощи: приблизительный вес луковицы, моркови и зубчика чеснока", () => {
+  for (const [name, grams] of [
+    ["Морковь свежая", 100],
+    ["Репчатый лук", 150],
+    ["Чеснок", 5],
+  ] as const) {
+    const conversion = automaticConversion(
+      { name, unit: "шт." },
+      { name, unit: "г" },
+    );
+    expect(conversion?.ratio).toBeCloseTo(1 / grams);
+    expect(conversion?.approximate).toBe(true);
+    expect(
+      automaticConversion({ name, unit: "г" }, { name, unit: "шт." })?.ratio,
+    ).toBe(grams);
+  }
+  expect(
+    automaticConversion(
+      { name: "Чеснок (головка)", unit: "шт." },
+      { name: "Чеснок", unit: "г" },
+    ),
+  ).toBeUndefined();
+  expect(
+    automaticConversion(
+      { name: "Зелёный лук", unit: "шт." },
+      { name: "Зелёный лук", unit: "г" },
+    ),
+  ).toBeUndefined();
+  expect(
+    automaticConversion(
+      { name: "Морковь", unit: "шт." },
+      { name: "Лук", unit: "г" },
+    ),
+  ).toBeUndefined();
+});

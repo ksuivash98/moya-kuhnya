@@ -1,6 +1,11 @@
+import { vegetablePieceWeight } from "./vegetable-names";
 import { fmt } from "./model";
 type NamedUnit = { name: string; unit: string };
-const measures: Record<string, { kind: "mass" | "volume"; scale: number }> = {
+const measures: Record<
+  string,
+  { kind: "mass" | "volume" | "piece"; scale: number }
+> = {
+  шт: { kind: "piece", scale: 1 },
   г: { kind: "mass", scale: 1 },
   кг: { kind: "mass", scale: 1000 },
   мл: { kind: "volume", scale: 1 },
@@ -78,7 +83,21 @@ export function automaticConversion(need: NamedUnit, source: NamedUnit) {
   if (!target || !actual) return undefined;
   let ratio: number;
   if (target.kind === actual.kind) ratio = actual.scale / target.scale;
-  else {
+  else if (target.kind === "piece" || actual.kind === "piece") {
+    const wanted = vegetablePieceWeight(need.name),
+      available = vegetablePieceWeight(source.name);
+    if (
+      !wanted ||
+      !available ||
+      wanted.name !== available.name ||
+      target.kind === "volume" ||
+      actual.kind === "volume"
+    )
+      return undefined;
+    const weight = (unit: typeof target) =>
+      unit.scale * (unit.kind === "piece" ? wanted.grams : 1);
+    ratio = weight(actual) / weight(target);
+  } else {
     const wanted = food(need.name),
       available = food(source.name);
     if (!wanted || !available || wanted.key !== available.key) return undefined;
@@ -86,7 +105,7 @@ export function automaticConversion(need: NamedUnit, source: NamedUnit) {
       unit.scale * (unit.kind === "volume" ? wanted.density : 1);
     ratio = weight(actual) / weight(target);
   }
-  const reverse = target.kind === "volume" && actual.kind === "mass";
+  const reverse = target.kind !== "mass" && actual.kind === "mass";
   return {
     ratio,
     description: reverse
@@ -104,6 +123,8 @@ export function automaticBaseUnit(
   unit: string,
 ): string | undefined {
   if (!measure(unit)) return undefined;
+  if (measure(unit)!.kind === "piece")
+    return vegetablePieceWeight(name) ? "г" : undefined;
   return food(name) ? "г" : measure(unit)!.kind === "mass" ? "г" : "мл";
 }
 export const isSpoon = (unit: string) =>

@@ -1,3 +1,4 @@
+import { vegetableName } from "./vegetable-names";
 import { automaticConversion } from "./unit-conversion";
 import {
   base,
@@ -159,7 +160,11 @@ export function ingredientDisplayName(name: string): string {
     )
     .replace(/[,\s]+$/u, "")
     .trim();
-  return ordinaryDairy(display) ?? (plainPasta(display) ? "Макароны" : display);
+  return (
+    vegetableName(display) ??
+    ordinaryDairy(display) ??
+    (plainPasta(display) ? "Макароны" : display)
+  );
 }
 export function ingredientName(name: string): string {
   let words = ingredientDisplayName(name)

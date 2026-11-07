@@ -1,3 +1,4 @@
+import { vegetablePieceWeight } from "./vegetable-names";
 import { automaticBaseUnit, isSpoon } from "./unit-conversion";
 import { base, factor, num, rows, str, type Row, type State } from "./model";
 import {
@@ -66,8 +67,18 @@ export function shoppingPlan(
   const errors: string[] = [],
     warnings: string[] = [];
   for (const n of matched) {
-    if (n.missing <= 0.00000001) continue;
     const choice = ingredientChoice(choices, n);
+    const reference = vegetablePieceWeight(n.name);
+    const usesAverage =
+      (base(n.unit) === "шт." && n.missing > 0.00000001) ||
+      n.matchedSources.some(
+        (source) => (base(n.unit) === "шт.") !== (base(source.unit) === "шт."),
+      );
+    if (reference && usesAverage && choice?.ratio === undefined) {
+      const warning = `${reference.name}: штуки пересчитаны в граммы приблизительно; ${reference.description}.`;
+      if (!warnings.includes(warning)) warnings.push(warning);
+    }
+    if (n.missing <= 0.00000001) continue;
     const chosenId = !n.sourceMismatch
       ? choice?.sourceId.match(/^product:([0-9a-f-]{36}):/)?.[1]
       : undefined;
@@ -100,7 +111,9 @@ export function shoppingPlan(
       quantity = n.missing;
     const sourCreamVolume =
       ingredientName(n.name) === "сметана" && base(n.unit) === "мл";
-    if (isSpoon(n.unit) || sourCreamVolume) {
+    const vegetablePiece =
+      base(n.unit) === "шт." ? vegetablePieceWeight(n.name) : undefined;
+    if (isSpoon(n.unit) || sourCreamVolume || vegetablePiece) {
       const selected = n.matchedSources.find(
         (source) => source.id === choice?.sourceId,
       );

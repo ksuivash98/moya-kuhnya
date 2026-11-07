@@ -177,3 +177,29 @@ test("молочные продукты со служебными уточнен
     combineIngredientNeeds(protectedNames.map((name) => need(name, 1, "г"))),
   ).toHaveLength(6);
 });
+
+test("овощи: свежесть и форма названия объединяются, виды и обработка сохраняются", () => {
+  const combined = combineIngredientNeeds([
+    need("Морковь", 831, "г"),
+    need("Морковь свежая", 350, "г"),
+    need("Огурцы свежие", 200, "г"),
+    need("Огурец", 100, "г"),
+  ]);
+  expect(combined).toMatchObject([
+    { name: "Морковь", quantity: 1181 },
+    { name: "Огурцы", quantity: 300 },
+  ]);
+  const names = [
+    "Репчатый лук",
+    "Зелёный лук",
+    "Цветная капуста",
+    "белокочанная капуста",
+    "Морковь варёная",
+    "Огурцы маринованные",
+    "Чеснок (головка)",
+    "Чеснок",
+  ];
+  expect(
+    combineIngredientNeeds(names.map((name) => need(name, 1, "г"))),
+  ).toHaveLength(8);
+});

@@ -222,3 +222,46 @@ test("сметана с жирностью и примечанием колич�
     "Сметана: мл пересчитаны в г приблизительно, 1 мл ≈ 1 г.",
   );
 });
+
+test("чеснок: зубчики и граммы в одной покупке; ручной коэффициент важнее среднего веса", () => {
+  const s = state({
+    products: [row(product, { name: "Чеснок", unit: "г" })],
+    menu_items: [
+      row("plan", {
+        month: "2026-11-01",
+        servings: 1,
+        planned_count: 1,
+        status: "Запланировано",
+        recipe_snapshot: {
+          servings: 1,
+          ingredients: [
+            { name: "чеснок", amount: 10.5, unit: "шт." },
+            { name: "Чеснок свежий", amount: 17, unit: "г" },
+          ],
+        },
+      }),
+    ],
+  });
+  expect(shoppingPlan(s, "f", scope, {}).targets).toMatchObject([
+    { quantity: 69.5, unit: "г" },
+  ]);
+  const plan = shoppingPlan(s, "f", scope, {
+    "чеснок|шт.": { sourceId: `product:${product}:г`, ratio: 1 / 7 },
+  });
+  expect(plan.targets).toHaveLength(1);
+  expect(plan.targets[0].quantity).toBeCloseTo(90.5);
+  expect(plan.warnings).toHaveLength(0);
+  const covered = shoppingPlan(
+    {
+      ...s,
+      stock_batches: [
+        row("garlic-stock", { product_id: product, quantity: 20, unit: "шт." }),
+      ],
+    },
+    "f",
+    scope,
+    {},
+  );
+  expect(covered.targets).toHaveLength(0);
+  expect(covered.warnings.join(" ")).toContain("зубчик ≈ 5 г");
+});

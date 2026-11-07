@@ -4478,3 +4478,95 @@ test("молочные дубли из покупок: сливки, смета�
     await b.close();
   }
 });
+
+test("овощи из покупок: свежие названия и штуки объединяются с явным средним весом", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const recipe = await b.save("Овощи из списка покупок");
+    const entries = [
+      ["чеснок", "10.5", "шт."],
+      ["Чеснок свежий", "17", "г"],
+      ["Морковь", "831", "г"],
+      ["Морковь свежая", "350", "г"],
+      ["морковь", "3.5", "шт."],
+      ["Репчатый лук", "4.5", "шт."],
+      ["Репчатый лук", "1125", "г"],
+      ["Зелёный лук", "20", "г"],
+      ["Цветная капуста", "250", "г"],
+      ["белокочанная капуста", "1170", "г"],
+    ];
+    recipe.data.ingredients = entries.map(([name, amount, unit]) => ({
+      ...recipe.data.ingredients[0],
+      id: crypto.randomUUID(),
+      name,
+      amount,
+      unit: unit as (typeof recipe.data.ingredients)[0]["unit"],
+    }));
+    await b.query("select public.save_recipe($1,$2,$3,1)", [
+      recipe.id,
+      b.family,
+      recipe.data,
+    ]);
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    await mutate("menu_save", {
+      id: crypto.randomUUID(),
+      recipe_id: recipe.id,
+      date: "2030-04-01",
+      month: "2030-04-01",
+      servings: recipe.data.servings,
+      meal: "Обед",
+      planned_count: 1,
+      status: "Запланировано",
+    });
+    await mutate("shopping_generate", { month: "2030-04-01" });
+    const open = () =>
+      b.query<{ quantity: string; unit: string }>(
+        "select quantity::text,unit from public.shopping_items where family_id=$1 and status='open' order by shopping_items.quantity",
+        [b.family],
+      );
+    expect((await open()).rows).toHaveLength(10);
+    await page.goto("/shopping?month=2030-04");
+    const calculate = page.getByRole("button", {
+      name: "Рассчитать недостающие продукты",
+      exact: true,
+    });
+    await calculate.click();
+    await expect(calculate).toBeEnabled();
+    expect(
+      (await open()).rows.map((r) => [Number(r.quantity), r.unit]),
+    ).toEqual([
+      [20, "г"],
+      [69.5, "г"],
+      [250, "г"],
+      [1170, "г"],
+      [1531, "г"],
+      [1800, "г"],
+    ]);
+    await expect(page.locator(".k-list article")).toHaveCount(6);
+    await expect(
+      page.getByText(
+        "Чеснок: штуки пересчитаны в граммы приблизительно; 1 шт. чеснока — зубчик ≈ 5 г.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "Морковь: штуки пересчитаны в граммы приблизительно; 1 средняя морковь ≈ 100 г.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await calculate.click();
+    await expect(calculate).toBeEnabled();
+    expect((await open()).rows).toHaveLength(6);
+  } finally {
+    await b.close();
+  }
+});
