@@ -1,5 +1,8 @@
 import { expect, test } from "vitest";
-import { shoppingGroups } from "../src/kitchen/shopping-groups";
+import {
+  shoppingGroups,
+  shoppingGroupQuantity,
+} from "../src/kitchen/shopping-groups";
 import type { Row } from "../src/kitchen/model";
 const row = (id: string, data: Record<string, string | number>): Row => ({
   id,
@@ -38,7 +41,7 @@ test("сохранённые ручные позиции макарон отоб
   expect(groups[0].members).toEqual(items);
   expect(items).toEqual(snapshot);
 });
-test("граммы и килограммы совместимы, разные категории, месяцы и неизвестные единицы не смешиваются", () => {
+test("граммы и килограммы совместимы, разные категории и месяцы не смешиваются", () => {
   expect(
     shoppingGroups(
       [{ ...items[0], quantity: 0.45, unit: "кг" }, items[1]],
@@ -46,7 +49,6 @@ test("граммы и килограммы совместимы, разные к
     )[0].display.quantity,
   ).toBe(700);
   for (const change of [
-    { unit: "упаковка" },
     { category: "Другое" },
     { month: "2030-05-01" },
     { family_id: "other" },
@@ -54,4 +56,24 @@ test("граммы и килограммы совместимы, разные к
     expect(
       shoppingGroups([items[0], { ...items[1], ...change }], products),
     ).toHaveLength(2);
+});
+
+test("укроп в граммах и веточках — одна карточка без выдуманного веса веточки", () => {
+  const product = row("dill", { name: "Укроп сушёный" });
+  const groups = shoppingGroups(
+    [
+      { ...items[0], product_id: product.id, quantity: 6, unit: "шт." },
+      { ...items[1], product_id: product.id, quantity: 50.4, unit: "г" },
+    ],
+    [product],
+  );
+  expect(groups).toHaveLength(1);
+  expect(shoppingGroupQuantity(groups[0])).toBe("50,4 г + 6 веточек");
+  expect(groups[0].members.map((r) => r.quantity)).toEqual([6, 50.4]);
+  const packs = shoppingGroups(
+    [items[0], { ...items[1], unit: "упаковка", quantity: 1.5 }],
+    products,
+  );
+  expect(packs).toHaveLength(1);
+  expect(shoppingGroupQuantity(packs[0])).toBe("450 г + 1,5 упаковка");
 });

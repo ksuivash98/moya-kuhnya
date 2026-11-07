@@ -203,3 +203,25 @@ test("овощи: свежесть и форма названия объедин
     combineIngredientNeeds(names.map((name) => need(name, 1, "г"))),
   ).toHaveLength(8);
 });
+
+test("паприка и сладкая паприка складываются, формы перца и другие виды паприки различаются", () => {
+  const groups = combineIngredientNeeds([
+    need("паприка", 7.5, "мл"),
+    need("паприка сладкая", 11.25, "мл"),
+  ]);
+  expect(groups).toHaveLength(1);
+  expect(groups[0]).toMatchObject({ name: "Паприка сладкая", quantity: 18.75 });
+  expect(
+    combineIngredientNeeds(
+      [
+        "Паприка",
+        "Паприка копчёная",
+        "Паприка острая",
+        "Чёрный перец горошек",
+        "чёрный молотый перец",
+        "Укроп свежий",
+        "Укроп сушёный",
+      ].map((name) => need(name, 1, "г")),
+    ),
+  ).toHaveLength(7);
+});

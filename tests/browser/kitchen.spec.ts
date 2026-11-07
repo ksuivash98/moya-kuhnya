@@ -4707,3 +4707,115 @@ test("сохранённые макароны: одна карточка 700 г 
     await b.close();
   }
 });
+
+test("специи: паприка одной суммой, укроп в граммах и веточках одной карточкой", async ({
+  page,
+}) => {
+  test.setTimeout(30000);
+  const b = await recipeBackend(page);
+  try {
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    const entries = [
+      ["панировочные сухари", 120, "г"],
+      ["Укроп сушёный", 50.4, "г"],
+      ["Укроп сушёный", 6, "шт."],
+      ["кунжут или смесь семян", 10, "мл"],
+      ["Уксус 9%", 5, "мл"],
+      ["паприка", 7.5, "мл"],
+      ["паприка сладкая", 11.25, "мл"],
+      ["Чёрный перец горошек", 10.2, "шт."],
+      ["чёрный молотый перец", 5.625, "мл"],
+    ] as const;
+    const products = new Map<string, string>();
+    for (const [name, quantity, unit] of entries) {
+      let product = products.get(name);
+      if (!product) {
+        product = crypto.randomUUID();
+        products.set(name, product);
+        await mutate("product_save", {
+          id: product,
+          name,
+          unit,
+          category: "Специи",
+          minimum: 0,
+        });
+      }
+      await mutate("shopping_save", {
+        id: crypto.randomUUID(),
+        product_id: product,
+        quantity,
+        unit,
+        month: "2030-04-01",
+        status: "open",
+      });
+    }
+    await page.goto("/shopping?month=2030-04");
+    const cards = page.locator(".k-list article");
+    await expect(cards).toHaveCount(7);
+    const paprika = cards.filter({
+      has: page.getByRole("heading", { name: "Паприка сладкая", exact: true }),
+    });
+    await expect(paprika.locator(".finance-item-quantity")).toHaveText(
+      "18,75 мл",
+    );
+    const dill = cards.filter({
+      has: page.getByRole("heading", { name: "Укроп сушёный", exact: true }),
+    });
+    await expect(dill.locator(".finance-item-quantity")).toHaveText(
+      "50,4 г + 6 веточек",
+    );
+    await expect(
+      cards.getByRole("heading", {
+        name: "Чёрный перец горошком",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      cards.getByRole("heading", { name: "Чёрный перец молотый", exact: true }),
+    ).toBeVisible();
+    await dill
+      .getByRole("button", { name: "Изменить / удалить", exact: true })
+      .click();
+    const group = page.getByRole("dialog", {
+      name: "Позиции: Укроп сушёный",
+      exact: true,
+    });
+    await expect(group).toContainText("Разные единицы показаны отдельно");
+    await group
+      .locator(".k-item")
+      .filter({ has: page.getByText("6 веточек", { exact: true }) })
+      .getByRole("button", { name: "Изменить / удалить", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByLabel("Количество", { exact: true })).toHaveValue(
+      "6",
+    );
+    await expect(dialog.getByLabel("Единица", { exact: true })).toHaveValue(
+      "шт.",
+    );
+    await dialog.getByRole("button", { name: "Отмена", exact: true }).click();
+    expect(
+      (
+        await b.query(
+          "select id from public.shopping_items where family_id=$1 and status='open'",
+          [b.family],
+        )
+      ).rows,
+    ).toHaveLength(9);
+    expect(
+      (
+        await b.query("select id from public.purchases where family_id=$1", [
+          b.family,
+        ])
+      ).rows,
+    ).toHaveLength(0);
+  } finally {
+    await b.close();
+  }
+});

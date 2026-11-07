@@ -1,4 +1,8 @@
-import { shoppingGroups } from "./shopping-groups";
+import {
+  shoppingGroups,
+  shoppingGroupQuantity,
+  shoppingQuantity,
+} from "./shopping-groups";
 import ShoppingCategories, {
   type CategorySuggestion,
 } from "./ShoppingCategories";
@@ -390,11 +394,16 @@ export default function Finance({
           onClose={() => setGroupAction(null)}
         >
           <p className="muted">
-            Всего: {fmt(num(selectedGroup.display, "quantity"))}{" "}
-            {str(selectedGroup.display, "unit")}. Выберите позицию, которую
-            купили или хотите изменить. Сумма на карточке включает все позиции
-            ниже.
+            Всего: {shoppingGroupQuantity(selectedGroup)}. Выберите позицию,
+            которую купили или хотите изменить. Сумма на карточке включает все
+            позиции ниже.
           </p>
+          {selectedGroup.quantities.length > 1 && (
+            <p className="notice">
+              Разные единицы показаны отдельно: их вес автоматически не
+              подставляется.
+            </p>
+          )}
           <div className="form-stack">
             {selectedGroup.members.map((item) => (
               <div className="k-item" key={item.id}>
@@ -405,7 +414,11 @@ export default function Finance({
                   )}
                 </strong>
                 <p>
-                  {fmt(num(item, "quantity"))} {str(item, "unit")}
+                  {shoppingQuantity(
+                    selectedGroup.name,
+                    num(item, "quantity"),
+                    str(item, "unit"),
+                  )}
                 </p>
                 <button
                   type="button"
@@ -714,7 +727,7 @@ export default function Finance({
             </div>
             <strong className="finance-item-quantity">
               {shopping
-                ? `${fmt(num(r, "quantity"))} ${str(r, "unit")}`
+                ? shoppingGroupQuantity(groupsById.get(r.id)!)
                 : rub(num(r, "amount"))}
             </strong>
             {shopping && (groupsById.get(r.id)?.members.length ?? 0) > 1 && (

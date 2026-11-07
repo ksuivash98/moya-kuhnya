@@ -152,6 +152,43 @@ function ordinaryDairy(name: string): string | undefined {
   )
     return "Сливочное масло";
 }
+function ordinarySpice(name: string): string | undefined {
+  const words = name
+    .toLocaleLowerCase("ru")
+    .replace(/ё/g, "е")
+    .replace(/[^а-яa-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/);
+  if (
+    words.includes("паприка") &&
+    words.every((w) =>
+      ["паприка", "сладкая", "сладкий", "молотая", "молотый"].includes(w),
+    )
+  )
+    return "Паприка сладкая";
+  if (
+    words.includes("укроп") &&
+    words.some((w) => ["сушеный", "сухой"].includes(w)) &&
+    words.every((w) =>
+      ["укроп", "сушеный", "сухой", "веточка", "веточки", "веточек"].includes(
+        w,
+      ),
+    )
+  )
+    return "Укроп сушёный";
+  if (words.includes("перец") && words.includes("черный")) {
+    if (
+      words.includes("молотый") &&
+      words.every((w) => ["перец", "черный", "молотый"].includes(w))
+    )
+      return "Чёрный перец молотый";
+    if (
+      words.some((w) => ["горошек", "горошком"].includes(w)) &&
+      words.every((w) => ["перец", "черный", "горошек", "горошком"].includes(w))
+    )
+      return "Чёрный перец горошком";
+  }
+}
 export function ingredientDisplayName(name: string): string {
   const display = name
     .replace(
@@ -163,6 +200,7 @@ export function ingredientDisplayName(name: string): string {
   return (
     vegetableName(display) ??
     ordinaryDairy(display) ??
+    ordinarySpice(display) ??
     (plainPasta(display) ? "Макароны" : display)
   );
 }
