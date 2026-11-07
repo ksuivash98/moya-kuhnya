@@ -686,7 +686,7 @@ export default function Finance({
           Категория
           <select
             aria-label="Категория списка"
-            data-shell-filter
+            data-shell-filter={busy || productBusy ? undefined : true}
             value={category}
             onChange={(e) => {
               setCategory(e.target.value);
