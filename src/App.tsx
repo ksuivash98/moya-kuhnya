@@ -1,3 +1,4 @@
+import { menuOnDate } from "./kitchen/menu-periods";
 import {
   type State as KitchenState,
   rows as kitchenRows,
@@ -845,7 +846,7 @@ export default function App() {
                           ? String(
                               kitchenRows(kitchenState, "menu_items").filter(
                                 (m) =>
-                                  m.date === kitchenToday() &&
+                                  menuOnDate(m, kitchenToday()) &&
                                   m.status !== "Отменено",
                               ).length,
                             )

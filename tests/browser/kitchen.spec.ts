@@ -3898,3 +3898,86 @@ test("сегодня в семье: переходы карточек, блюд�
     await b.close();
   }
 });
+
+test("общее меню на три дня: одна запись, общий расход и сохранение диапазона", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const recipe = await b.save("Общий суп на три дня");
+    await page.goto("/menu");
+    await expect(
+      page.getByRole("button", { name: "Добавить блюдо", exact: true }),
+    ).toBeEnabled();
+    await page.getByLabel("Месяц", { exact: true }).fill("2030-01");
+    await page
+      .getByRole("button", { name: "На несколько дней", exact: true })
+      .click();
+    await page.getByLabel("Начало периода", { exact: true }).fill("2030-01-31");
+    await expect(
+      page.getByLabel("Количество дней", { exact: true }),
+    ).toHaveValue("3");
+    await page
+      .getByRole("button", { name: "Добавить блюдо", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog");
+    await expect(
+      dialog.getByLabel("Начало периода", { exact: true }),
+    ).toHaveValue("2030-01-31");
+    await expect(
+      dialog.getByLabel("Конец периода", { exact: true }),
+    ).toHaveValue("2030-02-02");
+    await dialog
+      .getByLabel("Порций на весь период", { exact: true })
+      .fill(String(recipe.data.servings));
+    await dialog
+      .getByRole("button", { name: "Сохранить", exact: true })
+      .click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator(".planning-item")).toHaveCount(1);
+    await expect(page.locator(".planning-item")).toContainText(
+      "2030-01-31 — 2030-02-02",
+    );
+    const panel = page.locator("section.panel").filter({
+      has: page.getByRole("heading", {
+        name: "Ингредиенты плана",
+        exact: true,
+      }),
+    });
+    await expect(panel).toContainText("За период: 2030-01-31 — 2030-02-02");
+    await expect(
+      panel.locator("tbody tr").first().locator("td").nth(1),
+    ).toHaveText(/^500\s*г$/);
+    const saved = await b.query<{
+      date: string | null;
+      period_start: string;
+      period_end: string;
+      servings: number;
+    }>(
+      "select date,period_start::text,period_end::text,servings from public.menu_items where family_id=$1",
+      [b.family],
+    );
+    expect(saved.rows).toHaveLength(1);
+    expect(saved.rows[0]).toMatchObject({
+      date: null,
+      period_start: "2030-01-31",
+      period_end: "2030-02-02",
+    });
+    await page.reload();
+    await page.getByLabel("Месяц", { exact: true }).fill("2030-02");
+    await page.getByRole("button", { name: "Список", exact: true }).click();
+    await expect(page.locator(".planning-item")).toHaveCount(1);
+    await expect(page.locator(".planning-item")).toContainText(
+      recipe.data.title,
+    );
+    await expect(
+      panel.locator("tbody tr").first().locator("td").nth(1),
+    ).toHaveText(/^500\s*г$/);
+    await expect(page.locator("body")).toHaveJSProperty(
+      "scrollWidth",
+      await page.locator("body").evaluate((el) => el.clientWidth),
+    );
+  } finally {
+    await b.close();
+  }
+});

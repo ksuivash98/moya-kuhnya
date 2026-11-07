@@ -1,3 +1,4 @@
+import { menuOnDate } from "./menu-periods";
 import { ArrowUpRight } from "lucide-react";
 import LayoutToggle, { useListLayout } from "../components/ListLayout";
 import "./kitchen.css";
@@ -46,7 +47,7 @@ export default function Dashboard({
         str(b, "expires_on") <= today(),
     ).length,
     menus = rows(state, "menu_items").filter(
-      (m) => m.date === today() && m.status !== "Отменено",
+      (m) => menuOnDate(m, today()) && m.status !== "Отменено",
     );
   return (
     <section

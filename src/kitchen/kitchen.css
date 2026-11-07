@@ -687,3 +687,18 @@ details .checkbox-label {
 .cooking-ingredient-source p {
   margin: 6px 0;
 }
+
+.menu-period-settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.menu-period-settings label {
+  display: grid;
+  gap: 6px;
+}
+.menu-period-settings p {
+  flex-basis: 100%;
+  margin: 0;
+}

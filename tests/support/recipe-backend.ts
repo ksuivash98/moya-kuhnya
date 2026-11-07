@@ -37,6 +37,7 @@ export async function recipeBackend(
     "202611010015_recipe_multiple_categories.sql",
     "202611060016_cooking_sources.sql",
     "202611070017_preparation_broth.sql",
+    "202611070018_menu_periods.sql",
   ])
     await db.exec(readFileSync(`supabase/migrations/${file}`, "utf8"));
   for (const id of [owner, child])

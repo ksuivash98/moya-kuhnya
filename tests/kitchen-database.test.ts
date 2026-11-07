@@ -47,6 +47,7 @@ beforeAll(async () => {
     "202611010015_recipe_multiple_categories.sql",
     "202611060016_cooking_sources.sql",
     "202611070017_preparation_broth.sql",
+    "202611070018_menu_periods.sql",
   ]) {
     if (file === "202610310011_shopping_categories.sql")
       await db.exec(`
@@ -1529,4 +1530,87 @@ test("совместное использование проверяет под�
       ]),
     ),
   ).toBe(4);
+});
+
+test("меню на период: общий список, версии, повтор, изоляция и атомарный откат", async () => {
+  await user();
+  const id = crypto.randomUUID();
+  const data = {
+    id,
+    recipe_id: recipe,
+    period_start: "2099-01-31",
+    period_end: "2099-02-02",
+    month: "2099-01-01",
+    date: "",
+    meal: "Обед",
+    servings: 6,
+    planned_count: 1,
+    status: "Запланировано",
+  };
+  const key = crypto.randomUUID();
+  await op("menu_save", data, key);
+  await op("menu_save", data, key);
+  expect(
+    await scalar("select count(*) from public.menu_items where id=$1", [id]),
+  ).toBe(1);
+  expect(
+    await scalar(
+      "select date is null and period_start='2099-01-31' and period_end='2099-02-02' and servings=6 and planned_count=1 from public.menu_items where id=$1",
+      [id],
+    ),
+  ).toBe(true);
+  await expect(
+    op("menu_save", { ...data, version: 99, period_end: "2099-02-03" }),
+  ).rejects.toThrow(/План изменён/);
+  await expect(
+    op("menu_save", { ...data, version: 1, period_end: "2099-03-20" }),
+  ).rejects.toThrow(/от 1 до 31/);
+  await expect(
+    op("menu_save", {
+      ...data,
+      version: 1,
+      servings: 0,
+      period_start: "2099-02-01",
+      period_end: "2099-02-03",
+    }),
+  ).rejects.toThrow();
+  expect(
+    await scalar(
+      "select period_start='2099-01-31' and version=1 from public.menu_items where id=$1",
+      [id],
+    ),
+  ).toBe(true);
+  await op("menu_save", {
+    ...data,
+    version: 1,
+    period_start: "2099-02-01",
+    period_end: "2099-02-03",
+  });
+  expect(
+    await scalar(
+      "select month='2099-02-01' and period_start='2099-02-01' and version=2 from public.menu_items where id=$1",
+      [id],
+    ),
+  ).toBe(true);
+  await op("menu_repeat", { id, version: 2, count: 1, interval: 3 });
+  expect(
+    await scalar(
+      "select count(*) from public.menu_items where period_start='2099-02-04' and period_end='2099-02-06' and servings=6 and planned_count=1 and recipe_snapshot<>'{}'::jsonb",
+    ),
+  ).toBe(1);
+  await user(other);
+  expect(
+    await scalar("select count(*) from public.menu_items where id=$1", [id]),
+  ).toBe(0);
+  await expect(op("menu_save", { ...data, version: 2 })).rejects.toThrow(
+    /Нет права/,
+  );
+  await user();
+  await expect(
+    scalar("select public._menu_period_action($1,$2,'menu_save',$3)", [
+      family,
+      crypto.randomUUID(),
+      data,
+    ]),
+  ).rejects.toThrow(/permission denied/);
 });

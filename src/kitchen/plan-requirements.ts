@@ -1,5 +1,6 @@
 import { combineIngredientNeeds } from "./ingredient-groups";
 import { needs, rows, str, type State } from "./model";
+import { menuOverlaps, menuInMonth } from "./menu-periods";
 export type PlanScope = {
   month: string;
   kind?: "menu" | "cooking";
@@ -16,7 +17,9 @@ export function planRequirements(state: State, scope: PlanScope) {
     scope.kind === "cooking"
       ? []
       : rows(state, "menu_items").filter((r) =>
-          dated ? inRange(r) : str(r, "month") === scope.month + "-01",
+          dated
+            ? menuOverlaps(r, scope.from!, scope.to!)
+            : menuInMonth(r, scope.month),
         );
   const tasks = rows(state, "cooking_tasks").filter((r) =>
     dated ? inRange(r) : str(r, "date").startsWith(scope.month),

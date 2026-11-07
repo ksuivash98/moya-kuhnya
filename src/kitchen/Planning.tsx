@@ -1,3 +1,9 @@
+import {
+  menuOnDate,
+  menuOverlaps,
+  menuInMonth,
+  menuDateLabel,
+} from "./menu-periods";
 import LayoutToggle, { useListLayout } from "../components/ListLayout";
 import { categories as recipeCategories } from "../recipes/model";
 import { useState, useEffect, useRef } from "react";
@@ -127,6 +133,7 @@ export default function Planning({
       row?: Row;
       day?: string;
       recipeId?: string;
+      period?: boolean;
     } | null>(() =>
       canEdit && params.get("recipe")
         ? {
@@ -156,11 +163,18 @@ export default function Planning({
       setMode(kind === "menu" ? "Месяц" : "Список");
     }
   }, [kind, requestedView]);
+  const [periodDays, setPeriodDays] = useState("3");
+  const duration = Math.max(
+    1,
+    Math.min(31, Math.trunc(Number(periodDays)) || 3),
+  );
+  const periodEnd = addDays(anchor, duration - 1);
+  const periodEditing =
+    dialog?.action === "menu_save" &&
+    !!(dialog.period || dialog.row?.period_start);
   const range = monthRange(month);
   const menu = rows(state, "menu_items").filter(
-    (r) =>
-      str(r, "month") === range.from &&
-      (showCancelled || r.status !== "Отменено"),
+    (r) => menuInMonth(r, month) && (showCancelled || r.status !== "Отменено"),
   );
   const tasks = rows(state, "cooking_tasks").filter(
     (r) =>
@@ -196,10 +210,32 @@ export default function Planning({
   };
   const common: Field[] = [
     recipeField,
-    { key: "date", label: "Дата", type: "date", required: kind === "cooking" },
+    ...(periodEditing
+      ? [
+          {
+            key: "period_start",
+            label: "Начало периода",
+            type: "date",
+            required: true,
+          },
+          {
+            key: "period_end",
+            label: "Конец периода",
+            type: "date",
+            required: true,
+          },
+        ]
+      : [
+          {
+            key: "date",
+            label: "Дата",
+            type: "date",
+            required: kind === "cooking",
+          },
+        ]),
     {
       key: "servings",
-      label: "Количество порций",
+      label: periodEditing ? "Порций на весь период" : "Количество порций",
       type: "number",
       min: 0.0001,
       max: 1000,
@@ -239,8 +275,7 @@ export default function Planning({
                 { value: "", label: "Отдельное приготовление" },
                 ...menu.map((r) => ({
                   value: r.id,
-                  label:
-                    str(r, "title") + " · " + (str(r, "date") || "без даты"),
+                  label: str(r, "title") + " · " + menuDateLabel(r),
                 })),
               ],
             },
@@ -266,12 +301,16 @@ export default function Planning({
           ]
         : [
             ...common,
-            {
-              key: "month",
-              label: "Месяц списка (первое число)",
-              type: "date",
-              required: true,
-            },
+            ...(periodEditing
+              ? []
+              : [
+                  {
+                    key: "month",
+                    label: "Месяц списка (первое число)",
+                    type: "date",
+                    required: true,
+                  },
+                ]),
             {
               key: "meal",
               label: "Приём пищи",
@@ -293,6 +332,21 @@ export default function Planning({
             },
           ];
   async function save(action: string, d: Record<string, unknown>, key: string) {
+    if (periodEditing) {
+      if (!navigator.onLine)
+        throw new Error(
+          "Для сохранения меню на период подключитесь к интернету.",
+        );
+      if (state.schema_version < 18)
+        throw new Error(
+          "Для меню на несколько дней примените миграцию 018 в Supabase.",
+        );
+      const start = String(d.period_start),
+        end = String(d.period_end);
+      if (end < start || end > addDays(start, 30))
+        throw new Error("Выберите период от 1 до 31 дня.");
+      d = { ...d, date: "", month: start.slice(0, 7) + "-01" };
+    }
     const result = await mutate(family, action, d, key);
     await reload();
     notify(
@@ -319,7 +373,7 @@ export default function Planning({
   ];
   const inCalendar =
     kind === "menu"
-      ? !["Список", "Список без дат"].includes(mode)
+      ? !["Список", "Список без дат", "На несколько дней"].includes(mode)
       : ["Неделя", "День"].includes(mode);
   function actionButtons(r: Row) {
     const completed = [
@@ -369,7 +423,7 @@ export default function Planning({
                         id: crypto.randomUUID(),
                         version: 0,
                         menu_id: r.id,
-                        date: r.date || today(),
+                        date: r.date || r.period_start || today(),
                         status: "Запланировано",
                         planned_preparations: 0,
                         checked_steps: [],
@@ -476,6 +530,9 @@ export default function Planning({
         <div className="planning-item-title">
           <span className="pill quiet">{str(r, "meal") || str(r, "date")}</span>
           <h3>{str(r, "title")}</h3>
+          {r.period_start ? (
+            <small>Общий список: {menuDateLabel(r)}</small>
+          ) : null}
         </div>
         <div className="planning-item-summary">
           <p>
@@ -522,7 +579,8 @@ export default function Planning({
     days = Array.from({ length: 7 }, (_, i) => addDays(anchor, i - day));
   }
   if (mode === "День") days = [anchor];
-  const datedPeriod = mode === "Неделя" || mode === "День";
+  if (mode === "На несколько дней") days = [anchor, periodEnd];
+  const datedPeriod = ["Неделя", "День", "На несколько дней"].includes(mode);
   const scope = {
     month,
     kind: kind === "cooking" ? ("cooking" as const) : ("menu" as const),
@@ -538,7 +596,14 @@ export default function Planning({
           aria-label="Период планирования"
         >
           {(kind === "menu"
-            ? ["Месяц", "Неделя", "День", "Список", "Список без дат"]
+            ? [
+                "Месяц",
+                "Неделя",
+                "День",
+                "На несколько дней",
+                "Список",
+                "Список без дат",
+              ]
             : ["Список", "Неделя", "День"]
           ).map((m) => (
             <button
@@ -566,12 +631,12 @@ export default function Planning({
         <LayoutToggle
           value={layout}
           active={
-            ["Список", "Список без дат"].includes(mode) ||
+            ["Список", "Список без дат", "На несколько дней"].includes(mode) ||
             (kind === "cooking" && !["Неделя", "День"].includes(mode))
           }
           onChange={(v) => {
             setLayout(v);
-            setMode("Список");
+            if (mode !== "На несколько дней") setMode("Список");
           }}
         />
         {canEdit && (
@@ -579,7 +644,10 @@ export default function Planning({
             className="primary"
             disabled={!recipes.length}
             onClick={() =>
-              setDialog({ action: kind === "menu" ? "menu_save" : "task_save" })
+              setDialog({
+                action: kind === "menu" ? "menu_save" : "task_save",
+                period: mode === "На несколько дней",
+              })
             }
           >
             <Plus size={17} />
@@ -617,9 +685,9 @@ export default function Planning({
       </div>
       <p className="help-text">
         Категория меняет только карточки. Ингредиенты рассчитываются для
-        выбранного дня, недели или месяца. Очистка относится ко всему месяцу.
-        Плитка и строки показывают список за месяц; календарные режимы доступны
-        отдельно.
+        выбранного дня, недели, периода или месяца. Очистка относится ко всему
+        месяцу начала записи. Плитка и строки показывают список за месяц;
+        календарные режимы доступны отдельно.
       </p>
       {!recipes.length && (
         <p className="notice">
@@ -654,10 +722,44 @@ export default function Planning({
           </button>
         </div>
       )}
+      {mode === "На несколько дней" && (
+        <div className="panel menu-period-settings">
+          <label>
+            Начало периода
+            <input
+              type="date"
+              aria-label="Начало периода"
+              value={anchor}
+              onChange={(e) => e.target.value && setAnchor(e.target.value)}
+            />
+          </label>
+          <label>
+            Количество дней
+            <input
+              type="number"
+              aria-label="Количество дней"
+              min={1}
+              max={31}
+              step={1}
+              value={periodDays}
+              onChange={(e) => setPeriodDays(e.target.value)}
+              onBlur={() => setPeriodDays(String(duration))}
+            />
+          </label>
+          <p>
+            Общий список: {anchor} — {periodEnd}. Порции и ингредиенты указаны
+            на весь период. Пересекающиеся записи учитываются целиком один раз.
+          </p>
+        </div>
+      )}
       {mode === "Список без дат" ? (
         <div className={`k-list list-layout list-layout--${layout}`}>
-          {menu.filter((r) => !r.date && matchesCategory(r)).map(card)}
-          {!menu.some((r) => !r.date && matchesCategory(r)) && (
+          {menu
+            .filter((r) => !r.date && !r.period_start && matchesCategory(r))
+            .map(card)}
+          {!menu.some(
+            (r) => !r.date && !r.period_start && matchesCategory(r),
+          ) && (
             <div className="panel">
               Добавьте блюда без даты, чтобы распределить их по календарю позже.
               При назначении даты изменяется та же запись.
@@ -665,10 +767,24 @@ export default function Planning({
           )}
         </div>
       ) : mode === "Список" ||
+        mode === "На несколько дней" ||
         (kind === "cooking" && !["Неделя", "День"].includes(mode)) ? (
         <div className={`k-list list-layout list-layout--${layout}`}>
-          {(kind === "menu" ? menu : tasks).filter(matchesCategory).map(card)}
-          {!(kind === "menu" ? menu : tasks).some(matchesCategory) && (
+          {(mode === "На несколько дней"
+            ? active.filter((r) => menuOverlaps(r, anchor, periodEnd))
+            : kind === "menu"
+              ? menu
+              : tasks
+          )
+            .filter(matchesCategory)
+            .map(card)}
+          {!(
+            mode === "На несколько дней"
+              ? active.filter((r) => menuOverlaps(r, anchor, periodEnd))
+              : kind === "menu"
+                ? menu
+                : tasks
+          ).some(matchesCategory) && (
             <div className="panel">
               {category
                 ? "В этой категории записей нет. Выберите другую или все категории."
@@ -680,7 +796,9 @@ export default function Planning({
         <div className={`k-calendar ${mode === "День" ? "one-day" : ""}`}>
           {days.map((day) => {
             const dayRows = active.filter(
-              (r) => r.date === day && matchesCategory(r),
+              (r) =>
+                (kind === "menu" ? menuOnDate(r, day) : r.date === day) &&
+                matchesCategory(r),
             );
             return (
               <section
@@ -726,18 +844,20 @@ export default function Planning({
       <section className="panel k-section">
         <h2>Ингредиенты плана</h2>
         <p className="muted">
-          {mode === "День"
-            ? `За день: ${anchor}`
-            : mode === "Неделя"
-              ? `За неделю: ${days[0]} — ${days[6]}`
-              : `За месяц: ${month}`}
+          {mode === "На несколько дней"
+            ? `За период: ${anchor} — ${periodEnd}`
+            : mode === "День"
+              ? `За день: ${anchor}`
+              : mode === "Неделя"
+                ? `За неделю: ${days[0]} — ${days[6]}`
+                : `За месяц: ${month}`}
         </p>
         <p className="muted">
           Единицы г/кг и мл/л объединяются; остальные считаются отдельно. «По
           вкусу» уточните при готовке. Просроченные партии не учитываются.
         </p>
         <NavLink
-          to={`/shopping?${new URLSearchParams({ month, plan_kind: scope.kind, ...(scope.from && scope.to ? { plan_from: scope.from, plan_to: scope.to } : {}) })}`}
+          to={`/shopping?${new URLSearchParams({ month: mode === "На несколько дней" ? anchor.slice(0, 7) : month, plan_kind: scope.kind, ...(scope.from && scope.to ? { plan_from: scope.from, plan_to: scope.to } : {}) })}`}
         >
           Открыть покупки для этого периода
         </NavLink>
@@ -789,7 +909,7 @@ export default function Planning({
           <p className="muted">
             {[
               str(actionDetails, "meal"),
-              str(actionDetails, "date"),
+              menuDateLabel(actionDetails),
               `${fmt(num(actionDetails, "servings"))} порц.`,
               str(actionDetails, "status"),
               actionDetails.planned_count
@@ -864,7 +984,8 @@ export default function Planning({
             dialog.action === "menu_repeat" ? undefined : "planning-form-dialog"
           }
           offlineAllowed={
-            dialog.action === "menu_save" || dialog.action === "task_save"
+            !periodEditing &&
+            (dialog.action === "menu_save" || dialog.action === "task_save")
           }
           title={
             dialog.action === "menu_repeat"
@@ -872,6 +993,11 @@ export default function Planning({
               : dialog.action === "task_save"
                 ? "План приготовления"
                 : "Блюдо в меню"
+          }
+          description={
+            periodEditing
+              ? "Одна запись на весь период. Укажите общее количество порций; число дней не умножает ингредиенты."
+              : undefined
           }
           fields={fields}
           initial={{
@@ -885,6 +1011,9 @@ export default function Planning({
             status: "Запланировано",
             planned_preparations: 0,
             checked_steps: [],
+            ...(periodEditing
+              ? { period_start: anchor, period_end: periodEnd, date: "" }
+              : {}),
             ...dialog.row,
             ...(dialog.action === "task_save" ? { month: undefined } : {}),
             count: 1,
