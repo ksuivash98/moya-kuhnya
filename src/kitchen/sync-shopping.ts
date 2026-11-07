@@ -1,3 +1,4 @@
+import { suggestProductCategory } from "./product-category";
 import { loadKitchen, mutate } from "./api";
 import { client, check } from "../supabase";
 import { monthRange, num, rows, str, type Row } from "./model";
@@ -55,7 +56,12 @@ async function reconcile(family: string, userId: string, scope: PlanScope) {
       row.product_id === productId &&
       str(row, "unit") === unit &&
       num(row, "quantity") === quantity &&
-      row.status === status
+      row.status === status &&
+      str(row, "category") ===
+        str(
+          plan.products.find((p) => p.id === productId),
+          "category",
+        )
     )
       return;
     await mutate(
@@ -85,6 +91,9 @@ async function reconcile(family: string, userId: string, scope: PlanScope) {
         p_name: target.name,
       });
       check(category.error);
+      const suggested = suggestProductCategory(target.name);
+      const productCategory =
+        suggested !== "Другое" ? suggested : String(category.data || "Другое");
       await mutate(
         family,
         "product_save",
@@ -92,13 +101,19 @@ async function reconcile(family: string, userId: string, scope: PlanScope) {
           id,
           name: target.name,
           unit: target.unit,
-          category: String(category.data || "Другое"),
+          category: productCategory,
           minimum: 0,
           archived: false,
         },
         crypto.randomUUID(),
       );
-      product = { id, family_id: family, version: 1, name: target.name };
+      product = {
+        id,
+        family_id: family,
+        version: 1,
+        name: target.name,
+        category: productCategory,
+      };
       created.set(ingredientName(target.name), product);
     }
     const candidates = owned.filter(

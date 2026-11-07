@@ -4170,3 +4170,133 @@ test("покупки: выбор дня, недели и диапазона дл
     await b.close();
   }
 });
+
+test("категории после расчёта: уточнённые названия и общий просмотр старого Другого", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const recipe = await b.save("Блюдо с уточнёнными названиями");
+    recipe.data.ingredients = [
+      {
+        id: crypto.randomUUID(),
+        name: "Сметана 25%",
+        amount: "100",
+        unit: "г",
+      },
+      {
+        id: crypto.randomUUID(),
+        name: "Куриные сосиски",
+        amount: "2",
+        unit: "шт.",
+      },
+      {
+        id: crypto.randomUUID(),
+        name: "Чеснок свежий",
+        amount: "5",
+        unit: "г",
+      },
+      {
+        id: crypto.randomUUID(),
+        name: "Сливки 10–20%",
+        amount: "100",
+        unit: "мл",
+      },
+      { id: crypto.randomUUID(), name: "Начинка", amount: "1", unit: "шт." },
+    ].map((ingredient) => ({
+      ...recipe.data.ingredients[0],
+      ...ingredient,
+      unit: ingredient.unit as (typeof recipe.data.ingredients)[0]["unit"],
+    }));
+    await b.query("select public.save_recipe($1,$2,$3,1)", [
+      recipe.id,
+      b.family,
+      recipe.data,
+    ]);
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    await mutate("menu_save", {
+      id: crypto.randomUUID(),
+      recipe_id: recipe.id,
+      month: "2030-04-01",
+      date: "2030-04-01",
+      meal: "Обед",
+      servings: recipe.data.servings,
+      planned_count: 1,
+      status: "Запланировано",
+    });
+    await page.goto("/shopping?month=2030-04");
+    const calculate = page.getByRole("button", {
+      name: "Рассчитать недостающие продукты",
+      exact: true,
+    });
+    await calculate.click();
+    await expect(calculate).toBeEnabled();
+    const categories = async () =>
+      (
+        await b.query<{ name: string; category: string }>(
+          "select p.name,s.category from public.shopping_items s join public.products p on p.id=s.product_id where s.family_id=$1 and s.status='open' order by p.name",
+          [b.family],
+        )
+      ).rows;
+    await expect.poll(categories).toEqual([
+      { name: "Куриные сосиски", category: "Мясо" },
+      { name: "Начинка", category: "Другое" },
+      { name: "Сливки 10–20%", category: "Молочные продукты" },
+      { name: "Сметана 25%", category: "Молочные продукты" },
+      { name: "Чеснок свежий", category: "Овощи" },
+    ]);
+    // Старые автоматически созданные продукты тоже получили category_manual=true.
+    // Такое «Другое» нельзя молча перезаписывать: уточняем через общий просмотр.
+    for (const name of ["Сметана 25%", "Куриные сосиски"]) {
+      const product = (
+        await b.query<Record<string, unknown>>(
+          "select * from public.products where family_id=$1 and name=$2",
+          [b.family, name],
+        )
+      ).rows[0];
+      await mutate("product_save", { ...product, category: "Другое" });
+    }
+    await page.reload();
+    await calculate.click();
+    await expect(calculate).toBeEnabled();
+    expect(
+      (await categories()).find((p) => p.name === "Сметана 25%")?.category,
+    ).toBe("Другое");
+    await page
+      .getByRole("button", { name: "Уточнить категории (2)", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog");
+    await dialog
+      .getByRole("checkbox", {
+        name: "Куриные сосиски: Другое → Мясо",
+        exact: true,
+      })
+      .uncheck();
+    await dialog
+      .getByRole("button", { name: "Применить категории", exact: true })
+      .click();
+    await expect(dialog).toHaveCount(0);
+    expect(
+      (await categories()).find((p) => p.name === "Сметана 25%")?.category,
+    ).toBe("Молочные продукты");
+    expect(
+      (await categories()).find((p) => p.name === "Куриные сосиски")?.category,
+    ).toBe("Другое");
+    await calculate.click();
+    await expect(calculate).toBeEnabled();
+    expect(
+      (await categories()).find((p) => p.name === "Куриные сосиски")?.category,
+    ).toBe("Другое");
+    expect(
+      (await categories()).find((p) => p.name === "Сметана 25%")?.category,
+    ).toBe("Молочные продукты");
+  } finally {
+    await b.close();
+  }
+});

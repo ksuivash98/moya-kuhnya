@@ -1,3 +1,7 @@
+import ShoppingCategories, {
+  type CategorySuggestion,
+} from "./ShoppingCategories";
+import { suggestProductCategory } from "./product-category";
 import LayoutToggle, { useListLayout } from "../components/ListLayout";
 import { useSearchParams } from "react-router-dom";
 import { useState, useEffect } from "react";
@@ -88,6 +92,9 @@ export default function Finance({
   );
   const [layout, setLayout] = useListLayout(kind);
   const [category, setCategory] = useState("");
+  const [categoryReview, setCategoryReview] = useState<
+    CategorySuggestion[] | null
+  >(null);
   const [productBusy, setProductBusy] = useState(false);
   useEffect(() => {
     setCategory("");
@@ -320,6 +327,33 @@ export default function Finance({
           str(a, "category").localeCompare(str(b, "category"), "ru"),
         )
     : rows(state, "expenses").filter((r) => str(r, "date").startsWith(month));
+  const categorySuggestions: CategorySuggestion[] = [];
+  const suggestedProducts = new Set<string>();
+  if (shopping)
+    for (const row of allItems) {
+      if (
+        str(row, "category") !== "Другое" ||
+        suggestedProducts.has(String(row.product_id))
+      )
+        continue;
+      const product = products.find(
+        (p) => p.id === row.product_id && !p.archived,
+      );
+      if (!product) continue;
+      const saved = str(product, "category");
+      const suggested =
+        saved && saved !== "Другое"
+          ? saved
+          : suggestProductCategory(str(product, "name"));
+      if (suggested !== "Другое" && productCategories.includes(suggested)) {
+        categorySuggestions.push({
+          row,
+          name: str(product, "name"),
+          category: suggested,
+        });
+        suggestedProducts.add(product.id);
+      }
+    }
   const list = allItems.filter(
     (r) => !category || str(r, "category") === category,
   );
@@ -402,6 +436,14 @@ export default function Finance({
             Добавить потребность в список
           </button>
         </div>
+      )}
+      {categoryReview && (
+        <ShoppingCategories
+          suggestions={categoryReview}
+          family={family}
+          reload={reload}
+          onClose={() => setCategoryReview(null)}
+        />
       )}
       {shopping && canEdit && (
         <fieldset className="shopping-period-settings panel" disabled={busy}>
@@ -508,6 +550,15 @@ export default function Finance({
                 >
                   Рассчитать недостающие продукты
                 </button>
+                {categorySuggestions.length > 0 && (
+                  <button
+                    className="secondary"
+                    disabled={busy || !navigator.onLine}
+                    onClick={() => setCategoryReview(categorySuggestions)}
+                  >
+                    Уточнить категории ({categorySuggestions.length})
+                  </button>
+                )}
                 <button
                   className="secondary"
                   onClick={() => setDialog({ action: "shopping_save" })}
