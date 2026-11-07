@@ -54,6 +54,7 @@ export default function Inventory({
   const prep = kind === "preparations",
     products = rows(state, "products"),
     places = rows(state, "storage_places");
+  const expiryDue = !prep && params.get("expiry") === "due";
   const options = (a: string[]) => a.map((s) => ({ value: s, label: s }));
   const productOptions = products
     .filter((p) => !p.archived)
@@ -329,6 +330,7 @@ export default function Inventory({
   const visible = source.filter(
     (r) =>
       num(r, "quantity") > 0 &&
+      (!expiryDue || (!!r.expires_on && str(r, "expires_on") <= today())) &&
       `${prep ? str(r, "title") : str(product(r), "name")} ${categoryOf(r)}`
         .toLocaleLowerCase("ru")
         .includes(query.toLocaleLowerCase("ru")) &&
@@ -384,6 +386,12 @@ export default function Inventory({
             расход денег.
           </p>
         </section>
+      )}
+      {expiryDue && (
+        <p className="notice">
+          Показаны партии со сроком до сегодня включительно.{" "}
+          <NavLink to="/products">Показать все запасы</NavLink>
+        </p>
       )}
       <div className="k-toolbar">
         <input
@@ -484,9 +492,11 @@ export default function Inventory({
         <div className="panel k-empty">
           {query || filter || category
             ? "По этим условиям запасов нет. Измените поиск, категорию или место хранения."
-            : prep
-              ? "Заготовок пока нет. Их можно добавить вручную или получить при подтверждении готовки."
-              : "Запасов пока нет. Нажмите «Создать продукт», если названия ещё нет в списке, затем «Добавить запас» и укажите количество."}
+            : expiryDue
+              ? "Партий с истёкшим или истекающим сегодня сроком нет."
+              : prep
+                ? "Заготовок пока нет. Их можно добавить вручную или получить при подтверждении готовки."
+                : "Запасов пока нет. Нажмите «Создать продукт», если названия ещё нет в списке, затем «Добавить запас» и укажите количество."}
         </div>
       )}
       <div

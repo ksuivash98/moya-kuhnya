@@ -3806,3 +3806,95 @@ test("главная: карточки семьи, рецептов, меню и
     await b.close();
   }
 });
+
+test("сегодня в семье: переходы карточек, блюда и партии для проверки сроков", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const recipe = await b.save("Завтрак для перехода из семейного блока");
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    await mutate("menu_save", {
+      id: crypto.randomUUID(),
+      recipe_id: recipe.id,
+      month: day().slice(0, 7) + "-01",
+      date: day(),
+      meal: "Завтрак",
+      servings: 4,
+      planned_count: 1,
+      status: "Запланировано",
+    });
+    const product = crypto.randomUUID();
+    await mutate("product_save", {
+      id: product,
+      name: "Продукт для проверки перехода к срокам",
+      unit: "г",
+      minimum: 0,
+    });
+    for (const [quantity, expires_on] of [
+      [1, "2000-01-01"],
+      [5, "2099-01-01"],
+    ] as const)
+      await mutate("batch_save", {
+        id: crypto.randomUUID(),
+        product_id: product,
+        quantity,
+        unit: "г",
+        purchased_on: "1999-01-01",
+        expires_on,
+        reason: "Ручное добавление",
+      });
+    const targets = [
+      ["Блюд на сегодня", "/menu?view=day"],
+      ["Заготовок в наличии", "/preparations"],
+      ["Проверьте сроки партий", "/products?expiry=due"],
+      ["Позиций к покупке", "/shopping"],
+      ["Расходы месяца", "/budget"],
+    ];
+    for (const [label, path] of targets) {
+      await page.goto("/");
+      const panel = page.getByRole("region", {
+        name: "Сегодня в семье",
+        exact: true,
+      });
+      const card = panel
+        .locator(".k-metrics")
+        .getByRole("link", { name: new RegExp("^" + label) });
+      await expect(card).toHaveAttribute("href", path);
+      await card.click();
+      await expect(page).toHaveURL(new RegExp(path.replace("?", "\\?") + "$"));
+      if (label === "Блюд на сегодня")
+        await expect(page.locator(".k-calendar.one-day")).toBeVisible();
+      if (label === "Проверьте сроки партий") {
+        await expect(
+          page.getByText("Показаны партии со сроком до сегодня включительно.", {
+            exact: false,
+          }),
+        ).toBeVisible();
+        await expect(page.locator(".k-list article")).toHaveCount(1);
+        await page
+          .getByRole("link", { name: "Показать все запасы", exact: true })
+          .click();
+        await expect(page.locator(".k-list article")).toHaveCount(2);
+      }
+    }
+    await page.goto("/");
+    const meal = page
+      .getByRole("region", { name: "Сегодня в семье", exact: true })
+      .getByRole("link", { name: new RegExp("Завтрак: " + recipe.data.title) });
+    await meal.focus();
+    await meal.press("Enter");
+    await expect(page).toHaveURL(/\/menu\?view=day$/);
+    await expect(page.locator(".k-calendar.one-day")).toContainText(
+      recipe.data.title,
+    );
+  } finally {
+    await b.close();
+  }
+});

@@ -430,9 +430,37 @@ details .checkbox-label {
   margin-bottom: 0;
 }
 .family-dashboard .k-item {
+  position: relative;
+  padding-right: 40px;
+  color: inherit;
+  text-decoration: none;
   display: grid;
   gap: 8px;
   align-content: start;
+}
+.family-dashboard .dashboard-link-icon {
+  position: absolute;
+  top: 18px;
+  right: 16px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.family-dashboard .k-item:hover {
+  border-color: var(--green);
+}
+.family-dashboard :is(.k-item, .dashboard-meal-link):focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 3px;
+}
+.dashboard-meal-link {
+  display: block;
+  color: inherit;
+  padding: 5px 0;
+  overflow-wrap: anywhere;
+}
+.dashboard-meal-link svg {
+  display: inline;
+  vertical-align: middle;
 }
 .family-dashboard .k-item > span,
 .family-dashboard .k-item > small {
@@ -459,7 +487,7 @@ details .checkbox-label {
     gap: 12px;
   }
   .family-dashboard .k-item {
-    padding: 15px;
+    padding: 15px 38px 15px 15px;
   }
   .family-dashboard-budget {
     grid-column: 1 / -1;

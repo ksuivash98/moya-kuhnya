@@ -1,3 +1,4 @@
+import { ArrowUpRight } from "lucide-react";
 import LayoutToggle, { useListLayout } from "../components/ListLayout";
 import "./kitchen.css";
 import { useEffect, useState } from "react";
@@ -57,11 +58,21 @@ export default function Dashboard({
         <LayoutToggle value={layout} onChange={setLayout} />
       </div>
       <div className={`k-metrics list-layout list-layout--${layout}`}>
-        <NavLink to="/menu" className="k-item">
+        <NavLink to="/menu?view=day" className="k-item">
+          <ArrowUpRight
+            className="dashboard-link-icon"
+            size={16}
+            aria-hidden="true"
+          />
           <span>Блюд на сегодня</span>
           <strong>{menus.length}</strong>
         </NavLink>
         <NavLink to="/preparations" className="k-item">
+          <ArrowUpRight
+            className="dashboard-link-icon"
+            size={16}
+            aria-hidden="true"
+          />
           <span>Заготовок в наличии</span>
           <strong>
             {
@@ -70,11 +81,21 @@ export default function Dashboard({
             }
           </strong>
         </NavLink>
-        <NavLink to="/products" className="k-item">
+        <NavLink to="/products?expiry=due" className="k-item">
+          <ArrowUpRight
+            className="dashboard-link-icon"
+            size={16}
+            aria-hidden="true"
+          />
           <span>Проверьте сроки партий</span>
           <strong>{expired}</strong>
         </NavLink>
         <NavLink to="/shopping" className="k-item">
+          <ArrowUpRight
+            className="dashboard-link-icon"
+            size={16}
+            aria-hidden="true"
+          />
           <span>Позиций к покупке</span>
           <strong>
             {
@@ -85,6 +106,11 @@ export default function Dashboard({
         </NavLink>
         {state.summary && (
           <NavLink to="/budget" className="k-item family-dashboard-budget">
+            <ArrowUpRight
+              className="dashboard-link-icon"
+              size={16}
+              aria-hidden="true"
+            />
             <span>Расходы месяца</span>
             <strong>{rub(Number(state.summary.spent))}</strong>
             <small>Осталось: {rub(Number(state.summary.remaining))}</small>
@@ -93,7 +119,10 @@ export default function Dashboard({
       </div>
       {menus.map((m) => (
         <p key={m.id}>
-          {str(m, "meal")}: {str(m, "title")} — {str(m, "status")}
+          <NavLink className="dashboard-meal-link" to="/menu?view=day">
+            {str(m, "meal")}: {str(m, "title")} — {str(m, "status")}{" "}
+            <ArrowUpRight size={14} aria-hidden="true" />
+          </NavLink>
         </p>
       ))}
     </section>
