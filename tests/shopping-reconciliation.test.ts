@@ -194,3 +194,31 @@ test("при ошибочном старом выборе применяется
   expect(result.available).toBe(150);
   expect(result.missing).toBe(0);
 });
+
+test("сметана с жирностью и примечанием количества объединяется с приблизительным пересчётом мл в г", () => {
+  const s = state({
+    products: [row(product, { name: "Сметана 25%", unit: "г" })],
+    menu_items: [
+      row("plan", {
+        month: "2026-11-01",
+        servings: 1,
+        planned_count: 1,
+        status: "Запланировано",
+        recipe_snapshot: {
+          servings: 1,
+          ingredients: [
+            { name: "сметана 25%", amount: 375, unit: "г" },
+            { name: "сметана", amount: 402.5, unit: "г" },
+            { name: "сметана (100–125 г)", amount: 75, unit: "мл" },
+          ],
+        },
+      }),
+    ],
+  });
+  const plan = shoppingPlan(s, "f", scope, {});
+  expect(plan.targets).toHaveLength(1);
+  expect(plan.targets[0]).toMatchObject({ quantity: 852.5, unit: "г" });
+  expect(plan.warnings).toContain(
+    "Сметана: мл пересчитаны в г приблизительно, 1 мл ≈ 1 г.",
+  );
+});

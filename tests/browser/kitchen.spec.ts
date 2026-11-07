@@ -4247,13 +4247,13 @@ test("категории после расчёта: уточнённые наз�
     await expect.poll(categories).toEqual([
       { name: "Куриные сосиски", category: "Мясо" },
       { name: "Начинка", category: "Другое" },
-      { name: "Сливки 10–20%", category: "Молочные продукты" },
-      { name: "Сметана 25%", category: "Молочные продукты" },
+      { name: "Сливки", category: "Молочные продукты" },
+      { name: "Сметана", category: "Молочные продукты" },
       { name: "Чеснок свежий", category: "Овощи" },
     ]);
     // Старые автоматически созданные продукты тоже получили category_manual=true.
     // Такое «Другое» нельзя молча перезаписывать: уточняем через общий просмотр.
-    for (const name of ["Сметана 25%", "Куриные сосиски"]) {
+    for (const name of ["Сметана", "Куриные сосиски"]) {
       const product = (
         await b.query<Record<string, unknown>>(
           "select * from public.products where family_id=$1 and name=$2",
@@ -4266,7 +4266,7 @@ test("категории после расчёта: уточнённые наз�
     await calculate.click();
     await expect(calculate).toBeEnabled();
     expect(
-      (await categories()).find((p) => p.name === "Сметана 25%")?.category,
+      (await categories()).find((p) => p.name === "Сметана")?.category,
     ).toBe("Другое");
     await page
       .getByRole("button", { name: "Уточнить категории (2)", exact: true })
@@ -4283,7 +4283,7 @@ test("категории после расчёта: уточнённые наз�
       .click();
     await expect(dialog).toHaveCount(0);
     expect(
-      (await categories()).find((p) => p.name === "Сметана 25%")?.category,
+      (await categories()).find((p) => p.name === "Сметана")?.category,
     ).toBe("Молочные продукты");
     expect(
       (await categories()).find((p) => p.name === "Куриные сосиски")?.category,
@@ -4294,7 +4294,7 @@ test("категории после расчёта: уточнённые наз�
       (await categories()).find((p) => p.name === "Куриные сосиски")?.category,
     ).toBe("Другое");
     expect(
-      (await categories()).find((p) => p.name === "Сметана 25%")?.category,
+      (await categories()).find((p) => p.name === "Сметана")?.category,
     ).toBe("Молочные продукты");
   } finally {
     await b.close();
@@ -4352,14 +4352,12 @@ test("макароны: разные формы и описание пшениц
       );
     expect((await open()).rows).toHaveLength(2);
     await page.goto("/menu?month=2030-04");
-    const panel = page
-      .locator("section.panel")
-      .filter({
-        has: page.getByRole("heading", {
-          name: "Ингредиенты плана",
-          exact: true,
-        }),
-      });
+    const panel = page.locator("section.panel").filter({
+      has: page.getByRole("heading", {
+        name: "Ингредиенты плана",
+        exact: true,
+      }),
+    });
     await expect(panel.locator("tbody tr")).toHaveCount(1);
     await expect(
       panel.locator("tbody tr").first().locator("td").nth(1),
@@ -4393,6 +4391,89 @@ test("макароны: разные формы и описание пшениц
     await calculate.click();
     await expect(calculate).toBeEnabled();
     expect((await open()).rows.map((r) => Number(r.quantity))).toEqual([750]);
+  } finally {
+    await b.close();
+  }
+});
+
+test("молочные дубли из покупок: сливки, сметана и твёрдый сыр объединяются после пересчёта", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const recipe = await b.save("Молочные продукты с уточнениями");
+    const entries = [
+      ["Сливки 10–20%", "600", "мл"],
+      ["сливки", "150", "мл"],
+      ["сметана 25%", "375", "г"],
+      ["сметана (100–125 г)", "75", "мл"],
+      ["сметана", "402.5", "г"],
+      ["твёрдый сыр (по желанию)", "250", "г"],
+      ["Сыр твёрдый (российский, гауда)", "427.5", "г"],
+      ["твёрдый сыр", "705", "г"],
+      ["Сыр моцарелла", "337.5", "г"],
+    ];
+    recipe.data.ingredients = entries.map(([name, amount, unit]) => ({
+      ...recipe.data.ingredients[0],
+      id: crypto.randomUUID(),
+      name,
+      amount,
+      unit: unit as (typeof recipe.data.ingredients)[0]["unit"],
+    }));
+    await b.query("select public.save_recipe($1,$2,$3,1)", [
+      recipe.id,
+      b.family,
+      recipe.data,
+    ]);
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    await mutate("menu_save", {
+      id: crypto.randomUUID(),
+      recipe_id: recipe.id,
+      date: "2030-04-01",
+      month: "2030-04-01",
+      servings: recipe.data.servings,
+      meal: "Обед",
+      planned_count: 1,
+      status: "Запланировано",
+    });
+    await mutate("shopping_generate", { month: "2030-04-01" });
+    const open = () =>
+      b.query<{ quantity: string; unit: string }>(
+        "select quantity::text,unit from public.shopping_items where family_id=$1 and status='open' order by shopping_items.quantity",
+        [b.family],
+      );
+    expect((await open()).rows).toHaveLength(9);
+    await page.goto("/shopping?month=2030-04");
+    const calculate = page.getByRole("button", {
+      name: "Рассчитать недостающие продукты",
+      exact: true,
+    });
+    await calculate.click();
+    await expect(calculate).toBeEnabled();
+    expect(
+      (await open()).rows.map((r) => [Number(r.quantity), r.unit]),
+    ).toEqual([
+      [337.5, "г"],
+      [750, "мл"],
+      [852.5, "г"],
+      [1382.5, "г"],
+    ]);
+    await expect(page.locator(".k-list article")).toHaveCount(4);
+    await expect(
+      page.getByText(
+        "Сметана: мл пересчитаны в г приблизительно, 1 мл ≈ 1 г.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await calculate.click();
+    await expect(calculate).toBeEnabled();
+    expect((await open()).rows).toHaveLength(4);
   } finally {
     await b.close();
   }

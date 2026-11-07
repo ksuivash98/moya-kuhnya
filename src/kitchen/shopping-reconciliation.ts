@@ -98,7 +98,9 @@ export function shoppingPlan(
     }
     let unit = n.unit,
       quantity = n.missing;
-    if (isSpoon(n.unit)) {
+    const sourCreamVolume =
+      ingredientName(n.name) === "сметана" && base(n.unit) === "мл";
+    if (isSpoon(n.unit) || sourCreamVolume) {
       const selected = n.matchedSources.find(
         (source) => source.id === choice?.sourceId,
       );
@@ -122,11 +124,20 @@ export function shoppingPlan(
         if (ratio !== undefined && ratio > 0) {
           unit = target;
           quantity = n.missing / ratio;
+          if (sourCreamVolume && choice?.ratio === undefined)
+            warnings.push(
+              "Сметана: мл пересчитаны в г приблизительно, 1 мл ≈ 1 г.",
+            );
         }
       }
     }
     scales.set(n, quantity / n.missing);
-    const key = `${product?.id ?? identity(n.name, unit)}|${unit}`;
+    const canonical = identity(n.name, unit);
+    const productKey =
+      product && identity(str(product, "name"), unit) !== canonical
+        ? product.id
+        : canonical;
+    const key = `${productKey}|${unit}`;
     const group = groups.get(key) ?? {
       product,
       name: product ? str(product, "name") : n.name,

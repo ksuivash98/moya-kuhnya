@@ -87,6 +87,70 @@ function plainPasta(name: string) {
     words.every((w) => allowed.has(w))
   );
 }
+function ordinaryDairy(name: string): string | undefined {
+  const cleaned = name
+    .toLocaleLowerCase("ru")
+    .replace(/ё/g, "е")
+    .replace(/\(\s*по желанию\s*\)/g, "")
+    .replace(
+      /\(\s*\d+(?:[.,]\d+)?\s*(?:[-–—]\s*\d+(?:[.,]\d+)?)?\s*(?:г|гр|мл)\s*\)/g,
+      "",
+    )
+    .replace(/\d+(?:[.,]\d+)?\s*(?:[-–—]\s*\d+(?:[.,]\d+)?)?\s*%/g, "")
+    .replace(/[^а-яa-z0-9]+/g, " ")
+    .trim();
+  const words = cleaned.split(/\s+/);
+  for (const [title, main] of [
+    ["Сметана", "сметана"],
+    ["Сливки", "сливки"],
+    ["Молоко", "молоко"],
+    ["Кефир", "кефир"],
+    ["Творог", "творог"],
+  ]) {
+    if (
+      words.includes(main) &&
+      words.every(
+        (w) =>
+          [
+            main,
+            "жирность",
+            "жирности",
+            "по",
+            "желанию",
+            "г",
+            "гр",
+            "мл",
+          ].includes(w) || /^\d+$/.test(w),
+      )
+    )
+      return title;
+  }
+  if (
+    words.includes("сыр") &&
+    words.includes("твердый") &&
+    words.every((w) =>
+      [
+        "сыр",
+        "твердый",
+        "российский",
+        "гауда",
+        "или",
+        "и",
+        "по",
+        "желанию",
+      ].includes(w),
+    )
+  )
+    return "Твёрдый сыр";
+  if (
+    words.includes("масло") &&
+    words.includes("сливочное") &&
+    words.every((w) =>
+      ["масло", "сливочное", "для", "формочек", "формы", "форм"].includes(w),
+    )
+  )
+    return "Сливочное масло";
+}
 export function ingredientDisplayName(name: string): string {
   const display = name
     .replace(
@@ -95,7 +159,7 @@ export function ingredientDisplayName(name: string): string {
     )
     .replace(/[,\s]+$/u, "")
     .trim();
-  return plainPasta(display) ? "Макароны" : display;
+  return ordinaryDairy(display) ?? (plainPasta(display) ? "Макароны" : display);
 }
 export function ingredientName(name: string): string {
   let words = ingredientDisplayName(name)

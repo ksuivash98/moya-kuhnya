@@ -131,3 +131,49 @@ test("макароны с другой мукой, начинкой и посл�
   ]);
   expect(result).toHaveLength(6);
 });
+
+test("молочные продукты со служебными уточнениями объединяются, отдельные сорта сыра сохраняются", () => {
+  const grouped = combineIngredientNeeds([
+    need("Сливки 10–20%", 600, "мл"),
+    need("сливки", 150, "мл"),
+    need("твёрдый сыр (по желанию)", 250, "г"),
+    need("Сыр твёрдый (российский, гауда)", 427.5, "г"),
+    need("твёрдый сыр", 705, "г"),
+    need("Сыр моцарелла", 337.5, "г"),
+    need("Сливочное масло для формочек", 10, "г"),
+    need("Сливочное масло", 20, "г"),
+  ]);
+  expect(grouped).toHaveLength(4);
+  expect(grouped).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: "Сливки", quantity: 750, unit: "мл" }),
+      expect.objectContaining({
+        name: "Твёрдый сыр",
+        quantity: 1382.5,
+        unit: "г",
+      }),
+      expect.objectContaining({
+        name: "Сливочное масло",
+        quantity: 30,
+        unit: "г",
+      }),
+    ]),
+  );
+  expect(
+    ingredientChoice(
+      { "rule:25 сметана|г": { sourceId: "old" } },
+      need("Сметана", 10, "г"),
+    ),
+  ).toEqual({ sourceId: "old" });
+  const protectedNames = [
+    "Сливки для взбивания",
+    "Сливки кокосовые",
+    "Сметана без лактозы",
+    "Сыр плавленый",
+    "Молоко кокосовое",
+    "Сливочное масло топлёное",
+  ];
+  expect(
+    combineIngredientNeeds(protectedNames.map((name) => need(name, 1, "г"))),
+  ).toHaveLength(6);
+});

@@ -67,6 +67,8 @@ function food(name: string): { key: string; density: number } | undefined {
     ])
   )
     return { key: "milk", density: 1.03 };
+  if (matches("сметана", ["сметана", "жирность", "жирности"]))
+    return { key: "sour-cream", density: 1 };
   if (matches("мед", ["мед", "жидкий", "натуральный"]))
     return { key: "honey", density: 1.4 };
 }
