@@ -19,3 +19,11 @@ test.each([
 ])("категория %s → %s", (name, category) =>
   expect(suggestProductCategory(name)).toBe(category),
 );
+
+test.each([
+  ["Курица для бульона", "Мясо"],
+  ["Свинина для бульона и борща", "Мясо"],
+  ["Филе сёмги", "Рыба"],
+])("закупочная позиция %s → %s", (name, category) =>
+  expect(suggestProductCategory(name)).toBe(category),
+);

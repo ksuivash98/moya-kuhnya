@@ -1,3 +1,4 @@
+import { proteinProduct } from "./protein-products";
 import { vegetableName } from "./vegetable-names";
 import { automaticConversion } from "./unit-conversion";
 import {
@@ -197,7 +198,13 @@ export function ingredientDisplayName(name: string): string {
     )
     .replace(/[,\s]+$/u, "")
     .trim();
+  const protein = proteinProduct(display);
   return (
+    (protein
+      ? protein.cooked
+        ? "Отварное куриное мясо"
+        : protein.rawName
+      : undefined) ??
     vegetableName(display) ??
     ordinaryDairy(display) ??
     ordinarySpice(display) ??

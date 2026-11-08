@@ -1,3 +1,5 @@
+import { readChickenYield, saveChickenYield } from "./procurement";
+import { proteinProduct } from "./protein-products";
 import { Check, MoreHorizontal } from "lucide-react";
 import {
   shoppingGroups,
@@ -18,7 +20,7 @@ import ProductPicker from "./ProductPicker";
 import { loadKitchen, mutate } from "./api";
 import { syncShopping } from "./sync-shopping";
 import { stableShoppingId } from "./shopping-reconciliation";
-import type { PlanScope } from "./plan-requirements";
+import { planRequirements, type PlanScope } from "./plan-requirements";
 import {
   rows,
   str,
@@ -91,6 +93,22 @@ export default function Finance({
       ? { kind: planKind }
       : {}),
   };
+  const [chickenYield, setChickenYield] = useState(() =>
+    String(readChickenYield(userId, family)),
+  );
+  useEffect(
+    () => setChickenYield(String(readChickenYield(userId, family))),
+    [userId, family],
+  );
+  const yieldError =
+    !Number.isFinite(Number(chickenYield)) ||
+    Number(chickenYield) < 1 ||
+    Number(chickenYield) > 100
+      ? "Укажите выход готового куриного мяса не меньше 1 и не больше 100%."
+      : "";
+  const hasCookedChicken = planRequirements(state, scope).some(
+    (n) => n.unit === "г" && proteinProduct(n.name)?.cooked,
+  );
   const [calculationWarnings, setCalculationWarnings] = useState<string[]>([]);
   useEffect(
     () => setCalculationWarnings([]),
@@ -324,10 +342,15 @@ export default function Finance({
               },
             ];
   async function generate() {
-    if (periodError || busy) return;
+    if (periodError || yieldError || busy) return;
     setBusy(true);
     try {
-      const result = await syncShopping(family, userId, scope);
+      const result = await syncShopping(
+        family,
+        userId,
+        scope,
+        Number(chickenYield),
+      );
       setCalculationWarnings(result.warnings);
       await reload();
       setPage(0);
@@ -611,7 +634,12 @@ export default function Finance({
                     },
                     crypto.randomUUID(),
                   );
-                const result = await syncShopping(family, userId, { month });
+                const result = await syncShopping(
+                  family,
+                  userId,
+                  { month },
+                  Number(chickenYield),
+                );
                 setCalculationWarnings(result.warnings);
                 await reload();
                 notify("План и покупки обновлены.");
@@ -705,6 +733,42 @@ export default function Finance({
           браузере. Старые автоматические строки обновятся при пересчёте.
         </p>
       )}
+      {shopping && canEdit && (hasCookedChicken || chickenYield !== "75") && (
+        <details className="shopping-procurement-settings panel">
+          <summary>Объединение для покупки</summary>
+          <p className="muted">
+            Ингредиенты объединяются по закупочному продукту и назначению.
+            Нехватка отварного куриного мяса пересчитывается в сырое филе после
+            учёта заготовок и запасов. Например, при выходе 75% для 180 г
+            отварного мяса нужно примерно 240 г сырого филе.
+          </p>
+          <label>
+            Выход отварного куриного мяса, %
+            <input
+              aria-label="Выход отварного куриного мяса, %"
+              type="number"
+              min="1"
+              max="100"
+              step="0.1"
+              value={chickenYield}
+              onChange={(e) => {
+                setChickenYield(e.target.value);
+                saveChickenYield(userId, family, Number(e.target.value));
+                setCalculationWarnings([]);
+              }}
+            />
+          </label>
+          <p className="muted">
+            Ориентир зависит от приготовления. Меняйте его по фактическому
+            выходу. Настройка сохранится на этом устройстве для вашей семьи.
+          </p>
+        </details>
+      )}
+      {shopping && yieldError && (
+        <p className="error" role="alert">
+          {yieldError}
+        </p>
+      )}
       {shopping && calculationWarnings.length > 0 && (
         <div className="notice" role="status">
           {calculationWarnings.map((w) => (
@@ -734,7 +798,9 @@ export default function Finance({
               <>
                 <button
                   className="primary"
-                  disabled={busy || !navigator.onLine || !!periodError}
+                  disabled={
+                    busy || !navigator.onLine || !!periodError || !!yieldError
+                  }
                   onClick={() => void generate()}
                 >
                   Рассчитать недостающие продукты
@@ -1010,6 +1076,14 @@ export default function Finance({
                   : "Позиция покупок"
           }
           fields={fields}
+          description={
+            action === "purchase_confirm" && dialog.row
+              ? `Покупка: ${str(
+                  products.find((p) => p.id === dialog.row?.product_id),
+                  "name",
+                )}.`
+              : undefined
+          }
           externalBusy={productBusy}
           initial={{
             id: crypto.randomUUID(),

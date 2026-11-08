@@ -1,5 +1,8 @@
+import { proteinProduct } from "./protein-products";
 /** Conservative suggestions within the existing shared category catalogue. */
 export function suggestProductCategory(name: string): string {
+  const protein = proteinProduct(name);
+  if (protein) return protein.category;
   const n = name
     .toLocaleLowerCase("ru")
     .replace(/ё/g, "е")

@@ -4970,12 +4970,10 @@ test("покупки по образцу: категории, компактны
     expect(
       await page.locator("body").evaluate((el) => el.scrollWidth <= innerWidth),
     ).toBe(true);
-    await page
-      .locator(".shopping-checklist")
-      .screenshot({
-        path: `/tmp/shopping-checklist-${info.project.name}.png`,
-        style: ".topbar, .bottom-nav { visibility: hidden !important; }",
-      });
+    await page.locator(".shopping-checklist").screenshot({
+      path: `/tmp/shopping-checklist-${info.project.name}.png`,
+      style: ".topbar, .bottom-nav { visibility: hidden !important; }",
+    });
     await first.getByRole("button", { name: "Куплено", exact: true }).click();
     const dialog = page.getByRole("dialog");
     await expect(
@@ -5033,6 +5031,156 @@ test("покупки по образцу: категории, компактны
     expect(
       await page.locator("body").evaluate((el) => el.scrollWidth <= innerWidth),
     ).toBe(true);
+  } finally {
+    await b.close();
+  }
+});
+
+test("закупочные позиции: готовое мясо в сырьё, выход, разделение назначений и учёт покупки", async ({
+  page,
+}) => {
+  const b = await recipeBackend(page);
+  try {
+    const recipe = await b.save("Куриное мясо для закупочного плана");
+    recipe.data.ingredients = [
+      {
+        ...recipe.data.ingredients[0],
+        name: "куриное филе",
+        amount: "225",
+        unit: "г",
+      },
+      {
+        ...recipe.data.ingredients[0],
+        id: crypto.randomUUID(),
+        name: "Отварное куриное мясо",
+        amount: "180",
+        unit: "г",
+      },
+    ];
+    await b.query("select public.save_recipe($1,$2,$3,1)", [
+      recipe.id,
+      b.family,
+      recipe.data,
+    ]);
+    const mutate = (action: string, data: Record<string, unknown>) =>
+      b.query("select public.kitchen_mutate($1,$2,$3,$4)", [
+        b.family,
+        crypto.randomUUID(),
+        action,
+        data,
+      ]);
+    await mutate("menu_save", {
+      id: crypto.randomUUID(),
+      recipe_id: recipe.id,
+      date: "2030-04-01",
+      month: "2030-04-01",
+      servings: recipe.data.servings,
+      meal: "Обед",
+      planned_count: 1,
+      status: "Запланировано",
+    });
+    await mutate("shopping_generate", { month: "2030-04-01" });
+    for (const [name, quantity] of [
+      ["Курица для бульона", 1000],
+      ["Курица для бульонов", 500],
+      ["Свинина для отбивных", 300],
+      ["Свинина для борща", 450],
+    ] as const) {
+      const product = crypto.randomUUID();
+      await mutate("product_save", {
+        id: product,
+        name,
+        unit: "г",
+        minimum: 0,
+        category: "Мясо",
+      });
+      await mutate("shopping_save", {
+        id: crypto.randomUUID(),
+        product_id: product,
+        quantity,
+        unit: "г",
+        month: "2030-04-01",
+        status: "open",
+      });
+    }
+    await page.goto("/shopping?month=2030-04");
+    const calculate = page.getByRole("button", {
+      name: "Рассчитать недостающие продукты",
+      exact: true,
+    });
+    await calculate.click();
+    await expect(calculate).toBeEnabled();
+    const fillet = page
+      .locator(".k-list article")
+      .filter({
+        has: page.getByRole("heading", {
+          name: "Куриное филе для блюд и салатов",
+          exact: true,
+        }),
+      });
+    await expect(fillet).toHaveCount(1);
+    await expect(fillet.locator(".finance-item-quantity")).toHaveText("465 г");
+    await expect(
+      page.getByRole("heading", { name: "Курица для бульонов", exact: true }),
+    ).toHaveCount(1);
+    await expect(
+      page.getByRole("heading", { name: "Свинина для отбивных", exact: true }),
+    ).toHaveCount(1);
+    await expect(
+      page.getByRole("heading", {
+        name: "Свинина для бульона и борща",
+        exact: true,
+      }),
+    ).toHaveCount(1);
+    await expect(
+      page.getByText(/Отварное куриное мясо пересчитано.*выход 75%/),
+    ).toBeVisible();
+    await page.locator(".shopping-procurement-settings summary").click();
+    const yieldInput = page.getByLabel("Выход отварного куриного мяса, %", {
+      exact: true,
+    });
+    await yieldInput.fill("80");
+    await calculate.click();
+    await expect(calculate).toBeEnabled();
+    await expect(fillet.locator(".finance-item-quantity")).toHaveText("450 г");
+    await yieldInput.fill("0");
+    await expect(calculate).toBeDisabled();
+    await expect(page.getByRole("alert")).toContainText("не больше 100%");
+    await yieldInput.fill("80");
+    await page.reload();
+    await expect(yieldInput).toHaveValue("80");
+    await fillet.getByRole("button", { name: "Куплено", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByText(/Покупка: куриное филе/i)).toBeVisible();
+    await expect(
+      dialog.getByLabel("Фактически куплено", { exact: true }),
+    ).toHaveValue("450");
+    await dialog
+      .getByLabel("Стоимость всей покупки, ₽", { exact: true })
+      .fill("50");
+    await dialog
+      .getByRole("button", { name: "Сохранить", exact: true })
+      .click();
+    await expect(dialog).toHaveCount(0);
+    const stock = (
+      await b.query<{ quantity: string; name: string }>(
+        "select b.quantity::text,p.name from public.stock_batches b join public.products p on p.id=b.product_id where b.family_id=$1",
+        [b.family],
+      )
+    ).rows;
+    expect(stock).toHaveLength(1);
+    expect(stock[0].name.toLowerCase()).toBe("куриное филе");
+    expect(Number(stock[0].quantity)).toBe(450);
+    await calculate.click();
+    await expect(calculate).toBeEnabled();
+    await expect(fillet).toHaveCount(0);
+    expect(
+      (
+        await b.query("select id from public.purchases where family_id=$1", [
+          b.family,
+        ])
+      ).rows,
+    ).toHaveLength(1);
   } finally {
     await b.close();
   }

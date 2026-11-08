@@ -879,3 +879,19 @@ details .checkbox-label {
     opacity: 0.8;
   }
 }
+
+.shopping-procurement-settings {
+  margin: 16px 0;
+}
+.shopping-procurement-settings summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.shopping-procurement-settings label {
+  display: grid;
+  gap: 6px;
+  max-width: 320px;
+}
+.shopping-procurement-settings p {
+  margin: 12px 0;
+}

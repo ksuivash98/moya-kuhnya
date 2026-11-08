@@ -1,3 +1,4 @@
+import { proteinProduct } from "./protein-products";
 import { base, factor, fmt, num, str, type Row } from "./model";
 import { ingredientDisplayName, ingredientName } from "./ingredient-matching";
 
@@ -13,17 +14,20 @@ export function shoppingGroups(items: Row[], products: Row[]): ShoppingGroup[] {
   const groups = new Map<string, ShoppingGroup>();
   for (const item of items) {
     const name = names.get(String(item.product_id)) ?? "";
+    const protein = proteinProduct(name);
     const unit = base(str(item, "unit"));
+    const displayUnit = protein?.cooked ? `${unit} готового` : unit;
     const key = JSON.stringify([
       item.family_id,
       item.month,
       item.category,
-      name ? ingredientName(name) : item.product_id,
+      name ? (protein?.key ?? ingredientName(name)) : item.product_id,
     ]);
     let group = groups.get(key);
     if (!group) {
       group = {
-        name: ingredientDisplayName(name) || "Продукт",
+        name:
+          protein?.purchaseName ?? (ingredientDisplayName(name) || "Продукт"),
         display: { ...item, quantity: 0, unit },
         members: [],
         quantities: [],
@@ -31,9 +35,9 @@ export function shoppingGroups(items: Row[], products: Row[]): ShoppingGroup[] {
       groups.set(key, group);
     }
     const quantity = num(item, "quantity") * factor(str(item, "unit"));
-    const total = group.quantities.find((q) => q.unit === unit);
+    const total = group.quantities.find((q) => q.unit === displayUnit);
     if (total) total.quantity += quantity;
-    else group.quantities.push({ unit, quantity });
+    else group.quantities.push({ unit: displayUnit, quantity });
     group.display.quantity = group.quantities[0].quantity;
     group.members.push(item);
   }

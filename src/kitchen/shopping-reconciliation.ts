@@ -1,3 +1,5 @@
+import { procurementNeeds, purchasingRuleKey } from "./procurement";
+import { proteinProduct } from "./protein-products";
 import { vegetablePieceWeight } from "./vegetable-names";
 import { automaticBaseUnit, isSpoon } from "./unit-conversion";
 import { base, factor, num, rows, str, type Row, type State } from "./model";
@@ -5,9 +7,7 @@ import {
   ingredientChoice,
   sourceRatio,
   ingredientName,
-  ingredientRuleKey,
   inventorySources,
-  matchIngredients,
   type IngredientChoices,
   type MatchedNeed,
 } from "./ingredient-matching";
@@ -44,6 +44,7 @@ export function shoppingPlan(
   family: string,
   scope: PlanScope,
   choices: IngredientChoices,
+  chickenYield = 75,
 ) {
   const products = rows(state, "products").filter(
     (p) => p.family_id === family && !p.archived,
@@ -56,16 +57,20 @@ export function shoppingPlan(
   );
   const productById = new Map(products.map((p) => [p.id, p]));
   const identity = (name: string, unit: string) =>
-    ingredientRuleKey({ name, unit });
-  const matched = matchIngredients(
+    purchasingRuleKey(name, unit);
+  const procurement = procurementNeeds(
     planRequirements(state, scope),
     inventorySources(state, family),
     choices,
+    manual,
+    products,
+    chickenYield,
   );
+  const matched = procurement.matched;
   const groups = new Map<string, ShoppingTarget>();
   const scales = new Map<MatchedNeed, number>();
   const errors: string[] = [],
-    warnings: string[] = [];
+    warnings: string[] = [...procurement.warnings];
   for (const n of matched) {
     const choice = ingredientChoice(choices, n);
     const reference = vegetablePieceWeight(n.name);
@@ -88,7 +93,10 @@ export function shoppingPlan(
       .map((s) => productById.get(s.id.split(":")[1]))
       .find(Boolean);
     const equivalent = products.filter(
-      (p) => identity(str(p, "name"), n.unit) === identity(n.name, n.unit),
+      (p) =>
+        identity(str(p, "name"), n.unit) === identity(n.name, n.unit) &&
+        (proteinProduct(n.name)?.cooked ||
+          !proteinProduct(str(p, "name"))?.cooked),
     );
     product ??=
       equivalent.find((p) => manual.some((i) => i.product_id === p.id)) ??
@@ -99,6 +107,7 @@ export function shoppingPlan(
         (p) =>
           p.family_id === family &&
           p.archived &&
+          !proteinProduct(str(p, "name"))?.cooked &&
           identity(str(p, "name"), n.unit) === identity(n.name, n.unit),
       )
     ) {
@@ -180,6 +189,12 @@ export function shoppingPlan(
           item.product_id === group.product?.id ||
           group.aliases.has(identity(str(p, "name"), group.unit))
         )
+      )
+        continue;
+      if (
+        proteinProduct(str(p, "name"))?.cooked &&
+        base(str(item, "unit")) === "г" &&
+        !proteinProduct(group.name)?.cooked
       )
         continue;
       const unit = base(str(item, "unit"));

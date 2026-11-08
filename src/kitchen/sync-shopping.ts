@@ -1,9 +1,10 @@
+import { purchasingRuleKey, readChickenYield } from "./procurement";
 import { suggestProductCategory } from "./product-category";
 import { loadKitchen, mutate } from "./api";
 import { client, check } from "../supabase";
 import { monthRange, num, rows, str, type Row } from "./model";
 import { readIngredientChoices } from "./ingredient-preferences";
-import { ingredientName, ingredientRuleKey } from "./ingredient-matching";
+import { ingredientName } from "./ingredient-matching";
 import {
   isManagedShopping,
   shoppingPlan,
@@ -14,15 +15,21 @@ export async function syncShopping(
   family: string,
   userId: string,
   scope: PlanScope,
+  chickenYield = readChickenYield(userId, family),
 ) {
   if (navigator.locks)
     return navigator.locks.request(
       `kitchen-shopping:${family}:${scope.month}`,
-      () => reconcile(family, userId, scope),
+      () => reconcile(family, userId, scope, chickenYield),
     );
-  return reconcile(family, userId, scope);
+  return reconcile(family, userId, scope, chickenYield);
 }
-async function reconcile(family: string, userId: string, scope: PlanScope) {
+async function reconcile(
+  family: string,
+  userId: string,
+  scope: PlanScope,
+  chickenYield: number,
+) {
   const range = monthRange(scope.month);
   const state = await loadKitchen(family, range.from, range.to);
   const plan = shoppingPlan(
@@ -30,6 +37,7 @@ async function reconcile(family: string, userId: string, scope: PlanScope) {
     family,
     scope,
     readIngredientChoices(userId, family),
+    chickenYield,
   );
   if (plan.errors.length) throw new Error(plan.errors.join(" "));
   const cycle = rows(state, "purchases")
@@ -122,13 +130,13 @@ async function reconcile(family: string, userId: string, scope: PlanScope) {
         str(r, "unit") === target.unit &&
         (r.product_id === product!.id ||
           target.aliases.has(
-            ingredientRuleKey({
-              name: str(
+            purchasingRuleKey(
+              str(
                 plan.products.find((p) => p.id === r.product_id),
                 "name",
               ),
-              unit: target.unit,
-            }),
+              target.unit,
+            ),
           )),
     );
     const existing =
